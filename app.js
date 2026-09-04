@@ -206,7 +206,7 @@ async function fetchUserTodos() {
   try {
     const { data: todos, error } = await supabaseClient
       .from("todos")
-      .select("id, title, is_completed, user_id")
+      .select("id, title, is_completed, user_id, tag")
       .eq("user_id", currentSupabaseUser.id)
       .order("id", { ascending: false });
 
@@ -220,6 +220,7 @@ async function fetchUserTodos() {
       data.tasks = (todos || []).map((row) => {
         const isCompleted = Boolean(row.is_completed);
         const titleText = row.title || "Untitled Task";
+        const tagText = row.tag || "Review";
 
         return {
           id: String(row.id),
@@ -227,7 +228,7 @@ async function fetchUserTodos() {
           title: titleText,
           done: isCompleted,
           is_completed: isCompleted,
-          tag: "Review",
+          tag: tagText,
           date: todayStr,
           color: "#ff6e79"
         };
@@ -247,6 +248,7 @@ async function addSupabaseTodo(task) {
   try {
     const payload = {
       title: task.title,
+      tag: task.tag || "Review",
       is_completed: false,
       user_id: currentSupabaseUser.id
     };
@@ -266,6 +268,9 @@ async function addSupabaseTodo(task) {
       task.supabaseId = inserted[0].id;
       task.is_completed = Boolean(inserted[0].is_completed);
       task.done = task.is_completed;
+      if (inserted[0].tag) {
+        task.tag = inserted[0].tag;
+      }
       saveUser();
     }
   } catch (err) {
@@ -280,11 +285,15 @@ async function updateSupabaseTodo(task) {
 
   try {
     const completedState = Boolean(task.is_completed !== undefined ? task.is_completed : task.done);
+    const updatePayload = {
+      is_completed: completedState
+    };
+    if (task.tag) {
+      updatePayload.tag = task.tag;
+    }
     const { error } = await supabaseClient
       .from("todos")
-      .update({
-        is_completed: completedState
-      })
+      .update(updatePayload)
       .eq("id", targetId)
       .eq("user_id", currentSupabaseUser.id);
 
