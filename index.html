@@ -91,6 +91,54 @@
               </div>
             </article>
 
+            <article class="panel countdown-panel">
+              <div class="panel-header-row" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div class="panel-kicker" style="margin-bottom: 0;">Exam Countdown</div>
+                <button type="button" id="editCountdownBtn" class="edit-countdown-btn" title="Set Exam & Date">✎ Edit</button>
+              </div>
+
+              <!-- Live Clock Section -->
+              <div class="live-clock-card">
+                <span class="live-clock-kicker">Live Local Time</span>
+                <div id="liveClockDigits" class="live-clock-digits">--:--:--</div>
+                <div id="liveClockDate" class="live-clock-date">Loading date...</div>
+              </div>
+
+              <div class="countdown-divider"></div>
+
+              <!-- Exam Countdown Section -->
+              <div class="exam-countdown-card">
+                <div class="countdown-target-header">
+                  <span class="countdown-badge">Target Milestone</span>
+                  <h4 id="countdownExamTitle" class="countdown-exam-title">Upcoming Exam</h4>
+                </div>
+
+                <div id="countdownTiles" class="countdown-tiles">
+                  <div class="countdown-tile">
+                    <strong id="cdDays">00</strong>
+                    <span>Days</span>
+                  </div>
+                  <span class="countdown-colon">:</span>
+                  <div class="countdown-tile">
+                    <strong id="cdHours">00</strong>
+                    <span>Hours</span>
+                  </div>
+                  <span class="countdown-colon">:</span>
+                  <div class="countdown-tile">
+                    <strong id="cdMins">00</strong>
+                    <span>Mins</span>
+                  </div>
+                  <span class="countdown-colon">:</span>
+                  <div class="countdown-tile">
+                    <strong id="cdSecs">00</strong>
+                    <span>Secs</span>
+                  </div>
+                </div>
+
+                <p id="countdownTargetDateStr" class="countdown-target-date">Target: Set date</p>
+              </div>
+            </article>
+
             <article class="panel timer-panel">
               <div class="panel-kicker">Pomodoro timer</div>
               <div class="timer-tabs">
@@ -667,6 +715,50 @@
             <button type="button" id="modalSyncNowBtn" class="small-nav-btn" style="padding: 8px 12px; font-size: 11px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); cursor: pointer;">🔄 Sync Now</button>
             <button type="button" id="modalLogoutBtn" class="close-deck-btn" style="padding: 8px 14px; font-size: 11px; color: var(--red); border: 1px solid rgba(255, 110, 121, 0.3); border-radius: 6px; cursor: pointer; margin: 0;">Log Out</button>
           </div>
+        </div>
+      </div>
+    <!-- Exam Countdown Setup Modal -->
+    <div id="examCountdownModal" class="modal-backdrop hidden" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.65); display: flex; justify-content: center; align-items: center; z-index: 2150; backdrop-filter: blur(5px);">
+      <div class="panel modal-content" style="width: 100%; max-width: 360px; padding: 22px; display: flex; flex-direction: column; gap: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 12px 30px rgba(0,0,0,0.4);">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h3 style="font-size: 14px; font-weight: 700; margin: 0; color: var(--text);">Set Target Exam Countdown</h3>
+          <button type="button" id="closeExamCountdownModalBtn" style="background: transparent; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px;">✕</button>
+        </div>
+        <form id="examCountdownForm" style="display: flex; flex-direction: column; gap: 14px;">
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label for="examTitleInput" style="font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700;">Exam / Milestone Title</label>
+            <input type="text" id="examTitleInput" placeholder="e.g. USMLE Step 1, Final Pathology Exam" required style="padding: 8px 12px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); outline: none; width: 100%;" />
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label for="examDateTimeInput" style="font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700;">Target Date & Time</label>
+            <input type="datetime-local" id="examDateTimeInput" required style="padding: 8px 12px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); outline: none; width: 100%; color-scheme: dark;" />
+          </div>
+          <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px;">
+            <button type="button" id="cancelExamCountdownBtn" style="padding: 8px 14px; font-size: 11px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); cursor: pointer;">Cancel</button>
+            <button type="submit" class="primary-action" style="padding: 8px 14px; font-size: 11px; border: none; border-radius: 6px; cursor: pointer;">Save Target</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Unified In-App Dialog Modal (Alert, Confirm, Prompt) -->
+    <div id="appDialogModal" class="modal-backdrop hidden" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.65); display: flex; justify-content: center; align-items: center; z-index: 2300; backdrop-filter: blur(5px);">
+      <div class="panel modal-content dialog-modal-card" style="width: 100%; max-width: 380px; padding: 22px; display: flex; flex-direction: column; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 12px 30px rgba(0,0,0,0.45);">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h3 id="appDialogTitle" style="font-size: 14px; font-weight: 700; margin: 0; color: var(--text);">Notice</h3>
+          <button type="button" id="appDialogCloseBtn" style="background: transparent; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px;">✕</button>
+        </div>
+        <p id="appDialogMessage" style="font-size: 12px; color: var(--muted); margin: 0; line-height: 1.5; white-space: pre-line;"></p>
+        <div id="appDialogInputWrapper" class="hidden" style="display: flex; flex-direction: column; gap: 6px;">
+          <label id="appDialogInputLabel" style="font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700;"></label>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <input type="text" id="appDialogInput" style="padding: 8px 12px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); outline: none; width: 100%;" />
+            <span id="appDialogInputSuffix" class="hidden" style="font-size: 12px; color: var(--muted); font-weight: 600;"></span>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px;">
+          <button type="button" id="appDialogCancelBtn" class="secondary-action" style="padding: 8px 14px; font-size: 11px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); cursor: pointer;">Cancel</button>
+          <button type="button" id="appDialogConfirmBtn" class="primary-action" style="padding: 8px 16px; font-size: 11px; border: none; border-radius: 6px; cursor: pointer;">OK</button>
         </div>
       </div>
     </div>

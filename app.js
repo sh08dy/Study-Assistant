@@ -126,7 +126,11 @@ const defaultData = () => ({
   flashcardTotalTime: 0,
   flashcardTotalCount: 0,
   dailyFlashcards: {},
-  calendarEvents: []
+  calendarEvents: [],
+  targetExam: {
+    title: "USMLE Step 1 Exam",
+    targetDate: "2026-11-15T09:00"
+  }
 });
 
 // Supabase Cloud Configuration
@@ -161,6 +165,135 @@ let streakViewMode = "weekly";
 const el = (id) => document.getElementById(id);
 const authView = el("authView");
 const appView = el("appView");
+
+// ----------------------------------------------------
+// Modern In-App Modal Dialog System (Replaces Browser Dialogs)
+// ----------------------------------------------------
+let appDialogResolver = null;
+
+function showAppAlert(message, title = "Notice") {
+  return new Promise((resolve) => {
+    const modal = el("appDialogModal");
+    if (!modal) {
+      resolve();
+      return;
+    }
+    const titleEl = el("appDialogTitle");
+    const msgEl = el("appDialogMessage");
+    const inputWrapper = el("appDialogInputWrapper");
+    const cancelBtn = el("appDialogCancelBtn");
+    const confirmBtn = el("appDialogConfirmBtn");
+
+    if (titleEl) titleEl.textContent = title;
+    if (msgEl) msgEl.textContent = String(message || "");
+    if (inputWrapper) inputWrapper.classList.add("hidden");
+    if (cancelBtn) cancelBtn.classList.add("hidden");
+    if (confirmBtn) {
+      confirmBtn.textContent = "OK";
+      confirmBtn.classList.remove("hidden");
+    }
+    modal.classList.remove("hidden");
+    if (confirmBtn) confirmBtn.focus();
+
+    appDialogResolver = () => {
+      modal.classList.add("hidden");
+      resolve();
+    };
+  });
+}
+
+function showAppConfirm(message, title = "Confirm", confirmText = "Confirm", cancelText = "Cancel") {
+  return new Promise((resolve) => {
+    const modal = el("appDialogModal");
+    if (!modal) {
+      resolve(false);
+      return;
+    }
+    const titleEl = el("appDialogTitle");
+    const msgEl = el("appDialogMessage");
+    const inputWrapper = el("appDialogInputWrapper");
+    const cancelBtn = el("appDialogCancelBtn");
+    const confirmBtn = el("appDialogConfirmBtn");
+
+    if (titleEl) titleEl.textContent = title;
+    if (msgEl) msgEl.textContent = String(message || "");
+    if (inputWrapper) inputWrapper.classList.add("hidden");
+    if (cancelBtn) {
+      cancelBtn.textContent = cancelText;
+      cancelBtn.classList.remove("hidden");
+    }
+    if (confirmBtn) {
+      confirmBtn.textContent = confirmText;
+      confirmBtn.classList.remove("hidden");
+    }
+    modal.classList.remove("hidden");
+    if (confirmBtn) confirmBtn.focus();
+
+    appDialogResolver = (confirmed) => {
+      modal.classList.add("hidden");
+      resolve(Boolean(confirmed));
+    };
+  });
+}
+
+function showAppPrompt({ title = "Input", message = "", defaultValue = "", placeholder = "", inputType = "text", suffix = "", confirmText = "Save", cancelText = "Cancel" } = {}) {
+  return new Promise((resolve) => {
+    const modal = el("appDialogModal");
+    if (!modal) {
+      resolve(null);
+      return;
+    }
+    const titleEl = el("appDialogTitle");
+    const msgEl = el("appDialogMessage");
+    const inputWrapper = el("appDialogInputWrapper");
+    const input = el("appDialogInput");
+    const suffixEl = el("appDialogInputSuffix");
+    const cancelBtn = el("appDialogCancelBtn");
+    const confirmBtn = el("appDialogConfirmBtn");
+
+    if (titleEl) titleEl.textContent = title;
+    if (msgEl) msgEl.textContent = String(message || "");
+    
+    if (inputWrapper) inputWrapper.classList.remove("hidden");
+    if (input) {
+      input.type = inputType || "text";
+      input.placeholder = placeholder || "";
+      input.value = defaultValue !== undefined && defaultValue !== null ? String(defaultValue) : "";
+    }
+    
+    if (suffixEl) {
+      if (suffix) {
+        suffixEl.textContent = suffix;
+        suffixEl.classList.remove("hidden");
+      } else {
+        suffixEl.classList.add("hidden");
+      }
+    }
+
+    if (cancelBtn) {
+      cancelBtn.textContent = cancelText;
+      cancelBtn.classList.remove("hidden");
+    }
+    if (confirmBtn) {
+      confirmBtn.textContent = confirmText;
+      confirmBtn.classList.remove("hidden");
+    }
+    modal.classList.remove("hidden");
+    if (input) {
+      input.focus();
+      input.select();
+    }
+
+    appDialogResolver = (confirmed) => {
+      modal.classList.add("hidden");
+      if (confirmed && input) {
+        resolve(input.value);
+      } else {
+        resolve(null);
+      }
+    };
+  });
+}
 
 function loadDb() {
   try {
@@ -1057,6 +1190,8 @@ async function logout() {
 
 function renderAll() {
   renderDate();
+  renderLiveClock();
+  renderExamCountdown();
   renderProgress();
   renderStats();
   renderTimer();
@@ -1078,6 +1213,81 @@ function renderDate() {
     day: "numeric",
     year: "numeric"
   }).format(now);
+}
+
+function renderLiveClock() {
+  const clockEl = el("liveClockDigits");
+  const dateEl = el("liveClockDate");
+  if (!clockEl) return;
+
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, "0");
+  const mins = String(now.getMinutes()).padStart(2, "0");
+  const secs = String(now.getSeconds()).padStart(2, "0");
+  clockEl.textContent = `${hours}:${mins}:${secs}`;
+
+  if (dateEl) {
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      const offset = -now.getTimezoneOffset() / 60;
+      const gmtOffset = `GMT${offset >= 0 ? '+' : ''}${offset}`;
+      const dateStr = now.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+      dateEl.textContent = `${dateStr} · ${tz.replace(/_/g, " ")} (${gmtOffset})`;
+    } catch (e) {
+      dateEl.textContent = now.toDateString();
+    }
+  }
+}
+
+function renderExamCountdown() {
+  if (!data) return;
+  const exam = data.targetExam || { title: "Upcoming Exam", targetDate: "" };
+
+  const titleEl = el("countdownExamTitle");
+  if (titleEl) titleEl.textContent = exam.title || "Upcoming Exam";
+
+  const targetDateStrEl = el("countdownTargetDateStr");
+  const daysEl = el("cdDays");
+  const hoursEl = el("cdHours");
+  const minsEl = el("cdMins");
+  const secsEl = el("cdSecs");
+
+  if (!exam.targetDate) {
+    if (daysEl) daysEl.textContent = "--";
+    if (hoursEl) hoursEl.textContent = "--";
+    if (minsEl) minsEl.textContent = "--";
+    if (secsEl) secsEl.textContent = "--";
+    if (targetDateStrEl) targetDateStrEl.textContent = "Click 'Edit' to set an exam date";
+    return;
+  }
+
+  const target = new Date(exam.targetDate);
+  const now = new Date();
+  const diffMs = target.getTime() - now.getTime();
+
+  if (targetDateStrEl) {
+    targetDateStrEl.textContent = `Target: ${target.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} at ${target.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}`;
+  }
+
+  if (diffMs <= 0) {
+    if (daysEl) daysEl.textContent = "00";
+    if (hoursEl) hoursEl.textContent = "00";
+    if (minsEl) minsEl.textContent = "00";
+    if (secsEl) secsEl.textContent = "00";
+    if (targetDateStrEl) targetDateStrEl.textContent = "Milestone / Exam Reached! Good luck!";
+    return;
+  }
+
+  const totalSecs = Math.floor(diffMs / 1000);
+  const days = Math.floor(totalSecs / 86400);
+  const hours = Math.floor((totalSecs % 86400) / 3600);
+  const mins = Math.floor((totalSecs % 3600) / 60);
+  const secs = totalSecs % 60;
+
+  if (daysEl) daysEl.textContent = String(days).padStart(2, "0");
+  if (hoursEl) hoursEl.textContent = String(hours).padStart(2, "0");
+  if (minsEl) minsEl.textContent = String(mins).padStart(2, "0");
+  if (secsEl) secsEl.textContent = String(secs).padStart(2, "0");
 }
 
 function updateTimezoneLabel() {
@@ -1514,6 +1724,8 @@ function startTimerLoop() {
   }
   timerId = window.setInterval(() => {
     renderProgress();
+    renderLiveClock();
+    renderExamCountdown();
     if (!data || !data.timerRunning) return;
     
     const now = Date.now();
@@ -1553,35 +1765,42 @@ function stopTimerLoop() {
 function completeTimerSession() {
   playTone("complete");
   if (data.timerMode === "focus") {
-    const durationMinutes = Number(data.timerFocusDurationMin) || 25;
+    const totalSessionDurationSeconds = getTimerDuration("focus");
+    const actualSecondsElapsed = totalSessionDurationSeconds - remainingSeconds;
+    const actualMinutes = Math.floor(actualSecondsElapsed / 60);
+
     const subjectEl = el("timerSubjectSelect");
     const activeSubject = subjectEl ? subjectEl.value : (data.subjects && data.subjects[0] ? data.subjects[0].name : "General");
 
-    data.timerSession = (data.timerSession || 0) + 1;
-    data.sessionsToday = (data.sessionsToday || 0) + 1;
-    const todayStr = getLocalDateString();
-    data.dailySessions = data.dailySessions || {};
-    data.dailySessions[todayStr] = data.sessionsToday;
+    if (actualMinutes >= 1) {
+      data.timerSession = (data.timerSession || 0) + 1;
+      data.sessionsToday = (data.sessionsToday || 0) + 1;
+      const todayStr = getLocalDateString();
+      data.dailySessions = data.dailySessions || {};
+      data.dailySessions[todayStr] = data.sessionsToday;
 
-    data.dailyStudy = data.dailyStudy || {};
-    data.dailyStudy[todayStr] = (data.dailyStudy[todayStr] || 0) + (durationMinutes * 60);
+      data.dailyStudy = data.dailyStudy || {};
+      data.dailyStudy[todayStr] = (data.dailyStudy[todayStr] || 0) + (actualMinutes * 60);
 
-    const { currentStreak } = getStreakData();
-    data.streak = currentStreak;
-    data.bestStreak = Math.max(data.bestStreak || 0, currentStreak);
-    
-    // Log to Supabase study_sessions table
-    if (currentSupabaseUser) {
-      logStudySession(durationMinutes, activeSubject, "focus");
+      const { currentStreak } = getStreakData();
+      data.streak = currentStreak;
+      data.bestStreak = Math.max(data.bestStreak || 0, currentStreak);
+      
+      // Log to Supabase study_sessions table with actual elapsed minutes
+      if (currentSupabaseUser) {
+        logStudySession(actualMinutes, activeSubject, "focus");
+      } else {
+        userStudySessions.push({
+          subject: activeSubject,
+          duration_minutes: actualMinutes,
+          session_type: "focus",
+          created_at: new Date().toISOString()
+        });
+      }
+      renderSubjects();
     } else {
-      userStudySessions.push({
-        subject: activeSubject,
-        duration_minutes: durationMinutes,
-        session_type: "focus",
-        created_at: new Date().toISOString()
-      });
+      console.log(`Focus session ended early (${actualSecondsElapsed}s elapsed < 60s). Discarded to prevent inflating stats.`);
     }
-    renderSubjects();
 
     data.timerMode = "break";
   } else {
@@ -1772,6 +1991,12 @@ function normalizeData(savedData) {
     "#7c67ff": "Schedules",
     "#58ddd2": "Focus Sessions",
     "#ffb329": "Other"
+  };
+
+  // Assure targetExam exists
+  normalized.targetExam = normalized.targetExam || {
+    title: "USMLE Step 1 Exam",
+    targetDate: "2026-11-15T09:00"
   };
 
   // Assure all tasks have unique IDs
@@ -2516,7 +2741,8 @@ async function initCanvasDrawing(key, pageNum = 1) {
   const clearBtn = el("clearCanvasBtn");
   if (clearBtn) {
     clearBtn.addEventListener("click", async () => {
-      if (confirm("Clear all note annotations on this page?")) {
+      const confirmed = await showAppConfirm("Clear all note annotations on this page?", "Clear Annotations", "Clear All", "Cancel");
+      if (confirmed) {
         strokes = [];
         currentStroke = null;
         undoStack = [];
@@ -2859,7 +3085,8 @@ async function deleteActiveIndependentNote() {
   const note = (data.unlinkedNotes || []).find((n) => n.id === activeEditorNoteId);
   const title = note ? note.title : "this note";
 
-  if (!confirm(`Are you sure you want to delete "${title}"?`)) return;
+  const confirmed = await showAppConfirm("Delete Note", `Are you sure you want to delete "${title}"?`, "Delete", "Cancel");
+  if (!confirmed) return;
 
   data.unlinkedNotes = (data.unlinkedNotes || []).filter((n) => n.id !== activeEditorNoteId);
   saveUser();
@@ -3911,10 +4138,10 @@ function renderMonthView(container, events) {
       pill.textContent = evt.title;
       pill.addEventListener("click", (e) => {
         e.stopPropagation();
-        if (evt.type === "custom") {
+        if (evt.type === "custom" || evt.id) {
           openEditEventModal(evt.id);
         } else {
-          alert(`${evt.title}\nTime: ${evt.startTime} - ${evt.endTime}\nDescription: ${evt.desc}`);
+          showAppAlert(`${evt.title}\nTime: ${evt.startTime || "All Day"} - ${evt.endTime || ""}\n${evt.desc ? "Description: " + evt.desc : ""}`, "Event Details");
         }
       });
       cell.appendChild(pill);
@@ -4014,10 +4241,10 @@ function renderWeekView(container, events) {
         `;
 
         pill.addEventListener("click", () => {
-          if (evt.type === "custom") {
+          if (evt.type === "custom" || evt.id) {
             openEditEventModal(evt.id);
           } else {
-            alert(`${evt.title}\nTime: ${evt.startTime} - ${evt.endTime}\nDescription: ${evt.desc}`);
+            showAppAlert(`${evt.title}\nTime: ${evt.startTime || "All Day"} - ${evt.endTime || ""}\n${evt.desc ? "Description: " + evt.desc : ""}`, "Event Details");
           }
         });
 
@@ -4111,10 +4338,10 @@ function renderDayView(container, events) {
       `;
 
       pill.addEventListener("click", () => {
-        if (evt.type === "custom") {
+        if (evt.type === "custom" || evt.id) {
           openEditEventModal(evt.id);
         } else {
-          alert(`${evt.title}\nTime: ${evt.startTime} - ${evt.endTime}\nDescription: ${evt.desc}`);
+          showAppAlert(`${evt.title}\nTime: ${evt.startTime || "All Day"} - ${evt.endTime || ""}\n${evt.desc ? "Description: " + evt.desc : ""}`, "Event Details");
         }
       });
 
@@ -4196,10 +4423,10 @@ function renderAgendaView(container, events) {
       `;
 
       item.addEventListener("click", () => {
-        if (evt.type === "custom") {
+        if (evt.type === "custom" || evt.id) {
           openEditEventModal(evt.id);
         } else {
-          alert(`${evt.title}\nTime: ${evt.startTime} - ${evt.endTime}\nDescription: ${evt.desc}`);
+          showAppAlert(`${evt.title}\nTime: ${evt.startTime || "All Day"} - ${evt.endTime || ""}\n${evt.desc ? "Description: " + evt.desc : ""}`, "Event Details");
         }
       });
       groupNode.appendChild(item);
@@ -4283,12 +4510,12 @@ async function saveCalendarEvent() {
   const type = el("modalEventType") ? el("modalEventType").value : "custom";
 
   if (!title || !date || !startTime || !endTime) {
-    alert("Please fill in all required fields.");
+    showAppAlert("Please fill in all required fields (title, date, start time, and end time).", "Missing Information");
     return;
   }
 
   if (startTime >= endTime) {
-    alert("Start time must be before end time.");
+    showAppAlert("Start time must be before end time.", "Invalid Event Times");
     return;
   }
 
@@ -4349,7 +4576,8 @@ async function saveCalendarEvent() {
 }
 
 async function deleteCalendarEvent(id) {
-  if (confirm("Are you sure you want to delete this event?")) {
+  const confirmed = await showAppConfirm("Are you sure you want to delete this event?", "Delete Event", "Delete", "Cancel");
+  if (confirmed) {
     const isTask = (data.tasks || []).some(t => t.id === id);
     const existingEvt = (data.calendarEvents || []).find(e => e.id === id);
     data.calendarEvents = (data.calendarEvents || []).filter(e => e.id !== id);
@@ -4631,15 +4859,20 @@ async function viewNote(key, filename) {
 
     const createQuickDeckBtn = el("createQuickDeckBtn");
     if (createQuickDeckBtn) {
-      createQuickDeckBtn.addEventListener("click", () => {
-        const name = prompt("Enter a name for the new deck:");
+      createQuickDeckBtn.addEventListener("click", async () => {
+        const name = await showAppPrompt({
+          title: "Create Deck",
+          message: "Enter a name for the new deck:",
+          placeholder: "e.g. Pathology, Anatomy",
+          confirmText: "Create Deck"
+        });
         if (!name) return;
         const deckName = name.trim();
         if (!deckName) return;
 
         data.flashcardDecks = data.flashcardDecks || {};
         if (data.flashcardDecks[deckName]) {
-          alert(`A deck named "${deckName}" already exists.`);
+          await showAppAlert(`A deck named "${deckName}" already exists.`, "Deck Exists");
           return;
         }
 
@@ -4655,7 +4888,7 @@ async function viewNote(key, filename) {
           });
           deckSelect.value = deckName;
         }
-        alert(`Deck "${deckName}" created successfully!`);
+        await showAppAlert(`Deck "${deckName}" created successfully!`, "Deck Created");
       });
     }
 
@@ -4663,16 +4896,16 @@ async function viewNote(key, filename) {
     const quickCardBtn = el("quickCardSubmitBtn");
     if (quickCardBtn) {
       quickCardBtn.addEventListener("click", async () => {
-        const frontVal = el("quickCardFront").value.trim();
-        const backVal = el("quickCardBack").value.trim();
-        const targetDeck = el("quickCardDeckSelect").value;
+        const frontVal = el("quickCardFront") ? el("quickCardFront").value.trim() : "";
+        const backVal = el("quickCardBack") ? el("quickCardBack").value.trim() : "";
+        const targetDeck = el("quickCardDeckSelect") ? el("quickCardDeckSelect").value : "";
 
         if (!frontVal || !backVal) {
-          alert("Please enter both Front (Question) and Back (Answer) text.");
+          await showAppAlert("Please enter both Front (Question) and Back (Answer) text.", "Incomplete Card");
           return;
         }
         if (!targetDeck) {
-          alert("Please select a target deck first. Import or create a deck in the Flashcards tab.");
+          await showAppAlert("Please select a target deck first. Import or create a deck in the Flashcards tab.", "No Deck Selected");
           return;
         }
 
@@ -4689,10 +4922,10 @@ async function viewNote(key, filename) {
         saveUser();
         saveFlashcardDecks();
 
-        el("quickCardFront").value = "";
-        el("quickCardBack").value = "";
+        if (el("quickCardFront")) el("quickCardFront").value = "";
+        if (el("quickCardBack")) el("quickCardBack").value = "";
 
-        alert(`Card successfully added to deck: "${targetDeck}"!`);
+        await showAppAlert(`Card successfully added to deck: "${targetDeck}"!`, "Card Added");
       });
     }
 
@@ -4750,7 +4983,8 @@ function closeActiveNote() {
 async function deletePersonalNote(filename, event) {
   if (event) event.stopPropagation();
   
-  if (!confirm(`Are you sure you want to delete "${filename}"?`)) return;
+  const confirmed = await showAppConfirm("Delete Personal Note", `Are you sure you want to delete "${filename}"?`, "Delete", "Cancel");
+  if (!confirmed) return;
 
   const key = `notes:personal:${currentUser}:${filename}`;
   
@@ -4769,14 +5003,15 @@ async function deletePersonalNote(filename, event) {
     }
   } catch (err) {
     console.error("Failed to delete note:", err);
-    alert("Error deleting file: " + err.message);
+    await showAppAlert("Error Deleting File", err.message || "Failed to delete file.");
   }
 }
 
 async function deleteHostNote(filename, event) {
   if (event) event.stopPropagation();
   
-  if (!confirm(`Are you sure you want to delete the shared reference "${filename}"? This will delete it for ALL users.`)) return;
+  const confirmed = await showAppConfirm("Delete Shared Reference", `Are you sure you want to delete the shared reference "${filename}"? This will delete it for ALL users.`, "Delete", "Cancel");
+  if (!confirmed) return;
 
   const key = `notes:global:${filename}`;
   
@@ -4791,7 +5026,7 @@ async function deleteHostNote(filename, event) {
     }
   } catch (err) {
     console.error("Failed to delete shared note:", err);
-    alert("Error deleting shared note: " + err.message);
+    await showAppAlert("Error Deleting Shared Note", err.message || "Failed to delete shared note.");
   }
 }
 
@@ -4891,9 +5126,10 @@ function renderTreeNode(node, depth = 0) {
   
   const deleteBtn = header.querySelector(".delete-deck-btn-tree");
   if (deleteBtn) {
-    deleteBtn.addEventListener("click", (e) => {
+    deleteBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      if (confirm(`Are you sure you want to delete "${node.fullName}" (including all subdecks)?`)) {
+      const confirmed = await showAppConfirm(`Are you sure you want to delete "${node.fullName}" (including all subdecks)?`, "Delete Deck", "Delete", "Cancel");
+      if (confirmed) {
         deleteDeckAndSubdecks(node.fullName);
       }
     });
@@ -5487,7 +5723,7 @@ function bindEvents() {
 
   const subjectList = el("subjectList");
   if (subjectList) {
-    subjectList.addEventListener("click", (event) => {
+    subjectList.addEventListener("click", async (event) => {
       const targetBtn = event.target.closest(".target-mins-btn");
       if (!targetBtn) return;
       const index = Number(targetBtn.dataset.subjectIndex);
@@ -5495,7 +5731,15 @@ function bindEvents() {
       if (!subject) return;
 
       const currentTarget = subject.targetMinutes || 120;
-      const input = prompt(`Set study goal for ${subject.name} (in minutes):`, currentTarget);
+      const input = await showAppPrompt({
+        title: "Set Study Goal",
+        message: `Set target study time for ${subject.name} (in minutes):`,
+        defaultValue: currentTarget,
+        placeholder: "Minutes (e.g. 120)",
+        inputType: "number",
+        suffix: "mins",
+        confirmText: "Save Goal"
+      });
       if (input === null) return;
       const parsed = parseInt(input, 10);
       if (!isNaN(parsed) && parsed > 0) {
@@ -5605,15 +5849,20 @@ function bindEvents() {
 
   const createDeckBtn = el("createDeckBtn");
   if (createDeckBtn) {
-    createDeckBtn.addEventListener("click", () => {
-      const name = prompt("Enter a name for the new deck:");
+    createDeckBtn.addEventListener("click", async () => {
+      const name = await showAppPrompt({
+        title: "Create Flashcard Deck",
+        message: "Enter a name for the new deck:",
+        placeholder: "e.g. Cardiology, Pathology",
+        confirmText: "Create Deck"
+      });
       if (!name) return;
       const deckName = name.trim();
       if (!deckName) return;
 
       data.flashcardDecks = data.flashcardDecks || {};
       if (data.flashcardDecks[deckName]) {
-        alert(`A deck named "${deckName}" already exists.`);
+        await showAppAlert(`A deck named "${deckName}" already exists.`, "Deck Already Exists");
         return;
       }
 
@@ -5621,7 +5870,7 @@ function bindEvents() {
       saveUser();
       saveFlashcardDecks();
       renderFlashcardsTab();
-      alert(`Deck "${deckName}" created successfully!`);
+      await showAppAlert(`Deck "${deckName}" created successfully!`, "Deck Created");
     });
   }
 
@@ -5654,7 +5903,7 @@ function bindEvents() {
       if (!file) return;
 
       if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-        alert("Please select a PDF file.");
+        showAppAlert("Please select a PDF file.", "Invalid File Type");
         e.target.value = "";
         return;
       }
@@ -5664,7 +5913,8 @@ function bindEvents() {
       
       const exists = (data.notesList || []).some(n => n.filename === filename);
       if (exists) {
-        if (!confirm(`A file named "${filename}" already exists. Do you want to overwrite it?`)) {
+        const overwrite = await showAppConfirm(`A file named "${filename}" already exists. Do you want to overwrite it?`, "File Exists", "Overwrite", "Cancel");
+        if (!overwrite) {
           e.target.value = "";
           return;
         }
@@ -5692,7 +5942,7 @@ function bindEvents() {
         renderFileReaderTab();
       } catch (err) {
         console.error("Failed to upload note:", err);
-        alert("Error saving note: " + err.message);
+        showAppAlert("Error saving note: " + err.message, "Upload Error");
       }
     });
   }
@@ -5704,7 +5954,7 @@ function bindEvents() {
       if (!file) return;
 
       if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-        alert("Please select a PDF file.");
+        showAppAlert("Please select a PDF file.", "Invalid File Type");
         e.target.value = "";
         return;
       }
@@ -5712,7 +5962,8 @@ function bindEvents() {
       const filename = file.name;
       const key = `notes:global:${filename}`;
       
-      if (!confirm(`Do you want to upload "${filename}" as a shared reference for all users?`)) {
+      const confirmed = await showAppConfirm(`Do you want to upload "${filename}" as a shared reference for all users?`, "Upload Shared Reference", "Upload", "Cancel");
+      if (!confirmed) {
         e.target.value = "";
         return;
       }
@@ -5722,7 +5973,7 @@ function bindEvents() {
         renderFileReaderTab();
       } catch (err) {
         console.error("Failed to upload shared note:", err);
-        alert("Error saving shared note: " + err.message);
+        showAppAlert("Error saving shared note: " + err.message, "Upload Error");
       }
     });
   }
@@ -5807,6 +6058,91 @@ function bindEvents() {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
+    });
+  }
+
+  // App Dialog Modal Event Bindings
+  const appDialogConfirmBtn = el("appDialogConfirmBtn");
+  if (appDialogConfirmBtn) {
+    appDialogConfirmBtn.addEventListener("click", () => {
+      if (appDialogResolver) appDialogResolver(true);
+    });
+  }
+
+  const appDialogCancelBtn = el("appDialogCancelBtn");
+  if (appDialogCancelBtn) {
+    appDialogCancelBtn.addEventListener("click", () => {
+      if (appDialogResolver) appDialogResolver(false);
+    });
+  }
+
+  const appDialogCloseBtn = el("appDialogCloseBtn");
+  if (appDialogCloseBtn) {
+    appDialogCloseBtn.addEventListener("click", () => {
+      if (appDialogResolver) appDialogResolver(false);
+    });
+  }
+
+  const appDialogInput = el("appDialogInput");
+  if (appDialogInput) {
+    appDialogInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (appDialogResolver) appDialogResolver(true);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        if (appDialogResolver) appDialogResolver(false);
+      }
+    });
+  }
+
+  // Exam Countdown Modal Bindings
+  const editCountdownBtn = el("editCountdownBtn");
+  if (editCountdownBtn) {
+    editCountdownBtn.addEventListener("click", () => {
+      const modal = el("examCountdownModal");
+      if (!modal) return;
+      const exam = data && data.targetExam ? data.targetExam : { title: "USMLE Step 1 Exam", targetDate: "2026-11-15T09:00" };
+      const titleInput = el("examTitleInput");
+      const dateInput = el("examDateTimeInput");
+      if (titleInput) titleInput.value = exam.title || "";
+      if (dateInput) dateInput.value = exam.targetDate || "";
+      modal.classList.remove("hidden");
+    });
+  }
+
+  const closeExamCountdownModalBtn = el("closeExamCountdownModalBtn");
+  if (closeExamCountdownModalBtn) {
+    closeExamCountdownModalBtn.addEventListener("click", () => {
+      const modal = el("examCountdownModal");
+      if (modal) modal.classList.add("hidden");
+    });
+  }
+
+  const cancelExamCountdownBtn = el("cancelExamCountdownBtn");
+  if (cancelExamCountdownBtn) {
+    cancelExamCountdownBtn.addEventListener("click", () => {
+      const modal = el("examCountdownModal");
+      if (modal) modal.classList.add("hidden");
+    });
+  }
+
+  const examCountdownForm = el("examCountdownForm");
+  if (examCountdownForm) {
+    examCountdownForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const titleInput = el("examTitleInput");
+      const dateInput = el("examDateTimeInput");
+      const title = titleInput ? titleInput.value.trim() : "";
+      const targetDate = dateInput ? dateInput.value : "";
+      if (!title || !targetDate) return;
+
+      if (!data) data = defaultData();
+      data.targetExam = { title, targetDate };
+      saveUser();
+      const modal = el("examCountdownModal");
+      if (modal) modal.classList.add("hidden");
+      renderExamCountdown();
     });
   }
 }

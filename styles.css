@@ -274,10 +274,10 @@ button {
 }
 
 .dashboard-grid {
-  max-width: 1180px;
+  max-width: 1260px;
   margin: 20px auto 0;
   display: grid;
-  grid-template-columns: minmax(220px, 1.05fr) minmax(220px, 1fr) minmax(260px, 1.16fr);
+  grid-template-columns: repeat(12, 1fr);
   gap: 16px;
 }
 
@@ -301,10 +301,187 @@ button {
   margin-bottom: 18px;
 }
 
-.year-panel,
-.timer-panel {
+.year-panel {
+  grid-column: span 3;
   min-height: 440px;
   text-align: center;
+}
+
+.countdown-panel {
+  grid-column: span 3;
+  min-height: 440px;
+  display: flex;
+  flex-direction: column;
+}
+
+.timer-panel {
+  grid-column: span 3;
+  min-height: 440px;
+  text-align: center;
+}
+
+.stats-stack {
+  grid-column: span 3;
+}
+
+.coverage-panel {
+  grid-column: span 4;
+}
+
+.streak-panel {
+  grid-column: span 4;
+}
+
+.tasks-panel {
+  grid-column: span 4;
+}
+
+/* Clock & Exam Countdown Styling */
+.edit-countdown-btn {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--purple);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.edit-countdown-btn:hover {
+  background: rgba(124, 103, 255, 0.15);
+  border-color: var(--purple);
+}
+
+.live-clock-card {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.live-clock-kicker {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  font-weight: 700;
+  margin-bottom: 4px;
+  display: block;
+}
+
+.live-clock-digits {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: 1.5px;
+  line-height: 1.2;
+}
+
+.live-clock-date {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+.countdown-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 4px 0 12px 0;
+}
+
+.exam-countdown-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  text-align: center;
+  gap: 10px;
+}
+
+.countdown-target-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.countdown-badge {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--purple);
+  background: rgba(124, 103, 255, 0.12);
+  border: 1px solid rgba(124, 103, 255, 0.3);
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-weight: 700;
+  display: inline-block;
+}
+
+.countdown-exam-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 2px 0 0;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.countdown-tiles {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  margin: 6px 0;
+}
+
+.countdown-tile {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 6px;
+  min-width: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.countdown-tile strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1;
+}
+
+.countdown-tile span {
+  font-size: 9px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 3px;
+  font-weight: 700;
+}
+
+.countdown-colon {
+  font-family: monospace;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.countdown-target-date {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 0;
 }
 
 .year-ring,
@@ -858,6 +1035,15 @@ body.focusing .workspace {
     grid-template-columns: repeat(2, minmax(260px, 1fr));
   }
 
+  .year-panel,
+  .countdown-panel,
+  .timer-panel,
+  .coverage-panel,
+  .streak-panel,
+  .tasks-panel {
+    grid-column: span 1;
+  }
+
   .stats-stack {
     grid-column: 1 / -1;
     grid-template-columns: repeat(2, minmax(220px, 1fr));
@@ -881,6 +1067,17 @@ body.focusing .workspace {
   }
 
   .year-panel,
+  .countdown-panel,
+  .timer-panel,
+  .stats-stack,
+  .coverage-panel,
+  .streak-panel,
+  .tasks-panel {
+    grid-column: span 1;
+  }
+
+  .year-panel,
+  .countdown-panel,
   .timer-panel {
     min-height: auto;
   }
