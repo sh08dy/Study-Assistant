@@ -11,7 +11,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   </head>
   <body>
-    <main id="authView" class="auth-shell">
+    <main id="authView" class="auth-shell hidden">
       <section class="auth-panel">
         <div class="brand-mark">SA</div>
         <h1>Study Assistant</h1>
@@ -62,7 +62,6 @@
             <p id="dateLabel">Friday, Jun 19 2026</p>
           </div>
           <div class="top-actions">
-            <button id="focusModeButton" class="pill active" type="button"><span></span> Focus mode</button>
             <button id="streakButton" class="pill" type="button">♢ <strong id="topStreak">0</strong> day streak</button>
             <button id="soundButton" class="icon-pill" type="button" title="Toggle sound">♬</button>
             <button id="logoutButton" class="icon-pill danger" type="button" title="Logout">↳</button>
@@ -171,12 +170,6 @@
                   <small style="color: var(--muted);">Set Daily Goal:</small>
                   <input id="flashcardsGoalInput" type="number" min="5" max="1000" step="5" value="50" aria-label="Daily flashcard goal" />
                 </label>
-              </div>
-              <div class="stat-card" data-stat="focusScore">
-                <span>Focus score <b>⚡</b></span>
-                <strong><span id="focusScoreText">87</span><small>/100</small></strong>
-                <i><em id="focusScoreBar"></em></i>
-                <small>↑ 12 pts from yesterday</small>
               </div>
               <div class="stat-card" data-stat="streak">
                 <span>Current streak <b>♨</b></span>

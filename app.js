@@ -101,11 +101,11 @@ const defaultData = () => ({
   unlinkedNotes: [],
   isHost: false,
   subjects: [
-    { name: "Pathology", value: 72, color: "purple" },
-    { name: "Anatomy", value: 55, color: "mint" },
-    { name: "Biochemistry", value: 40, color: "amber" },
-    { name: "Physiology", value: 88, color: "purple" },
-    { name: "Pharmacology", value: 30, color: "red" }
+    { name: "Pathology", value: 0, targetMinutes: 120, color: "purple" },
+    { name: "Anatomy", value: 0, targetMinutes: 120, color: "mint" },
+    { name: "Biochemistry", value: 0, targetMinutes: 120, color: "amber" },
+    { name: "Physiology", value: 0, targetMinutes: 120, color: "purple" },
+    { name: "Pharmacology", value: 0, targetMinutes: 120, color: "red" }
   ],
   week: [false, false, false, false, false, false, false],
   tasks: [
@@ -546,6 +546,7 @@ async function logStudySession(durationMinutes, subject = "General", sessionType
 
     if (inserted && inserted.length > 0) {
       userStudySessions.push(inserted[0]);
+      if (typeof renderSubjects === "function") renderSubjects();
     }
     return inserted?.[0] || null;
   } catch (err) {
@@ -557,6 +558,7 @@ async function logStudySession(durationMinutes, subject = "General", sessionType
 async function fetchUserStudySessions() {
   if (!supabaseClient || !currentSupabaseUser) {
     userStudySessions = [];
+    if (typeof renderSubjects === "function") renderSubjects();
     return [];
   }
 
@@ -573,6 +575,7 @@ async function fetchUserStudySessions() {
     }
 
     userStudySessions = rows || [];
+    if (typeof renderSubjects === "function") renderSubjects();
     return userStudySessions;
   } catch (err) {
     console.error("fetchUserStudySessions exception:", err);
@@ -937,12 +940,14 @@ async function handleAuth(event) {
 
 async function login(email, supabaseUser = null) {
   currentUser = email;
-  currentSupabaseUser = supabaseUser;
+  if (supabaseUser) {
+    currentSupabaseUser = supabaseUser;
+  }
   localStorage.setItem(`${storeKey}:session`, email);
 
   if (!db.users[email]) {
     db.users[email] = {
-      name: supabaseUser?.user_metadata?.name || email.split("@")[0],
+      name: supabaseUser?.user_metadata?.name || currentSupabaseUser?.user_metadata?.name || email.split("@")[0],
       data: defaultData()
     };
     saveDb();
@@ -959,8 +964,9 @@ async function login(email, supabaseUser = null) {
   
   db.users[email].data = data;
   saveDb();
-  authView.classList.add("hidden");
-  appView.classList.remove("hidden");
+  if (authView) authView.classList.add("hidden");
+  if (appView) appView.classList.remove("hidden");
+  closeAuthModal();
 
   // Update avatar & tooltips
   const initials = (email || "SA").substring(0, 2).toUpperCase();
@@ -981,16 +987,18 @@ async function login(email, supabaseUser = null) {
   if (supabaseClient) {
     if (!currentSupabaseUser) {
       try {
-        const { data: userData } = await supabaseClient.auth.getUser();
-        if (userData?.user) {
-          currentSupabaseUser = userData.user;
+        const { data: sessData } = await supabaseClient.auth.getSession();
+        if (sessData?.session?.user) {
+          currentSupabaseUser = sessData.session.user;
         }
       } catch (e) {}
     }
     if (currentSupabaseUser) {
-      fetchUserTodos();
-      fetchUserEvents();
-      fetchUserStudySessions();
+      await Promise.all([
+        fetchUserTodos(),
+        fetchUserEvents(),
+        fetchUserStudySessions()
+      ]);
       setupSupabaseRealtime(currentSupabaseUser.id);
     }
     fetchSharedResources();
@@ -1051,8 +1059,9 @@ function renderAll() {
   renderSubjects();
   renderStreak();
   renderTasks();
-  document.body.classList.toggle("focusing", data.focusMode);
-  el("focusModeButton").classList.toggle("active", data.focusMode);
+  document.body.classList.toggle("focusing", Boolean(data.focusMode));
+  const focusBtn = el("focusModeButton");
+  if (focusBtn) focusBtn.classList.toggle("active", Boolean(data.focusMode));
   el("soundButton").textContent = data.sound ? "♬" : "♩";
   el("userButton").textContent = getInitials(db.users[currentUser]?.name || currentUser);
 }
@@ -1126,8 +1135,10 @@ function renderStats() {
   el("flashcardsGoalInput").value = data.flashcardsGoal || 50;
   const avgTime = data.flashcardTotalCount > 0 ? (data.flashcardTotalTime / data.flashcardTotalCount).toFixed(1) : 0;
   el("flashcardAvgTime").textContent = `Avg time: ${avgTime}s`;
-  el("focusScoreText").textContent = data.focusScore;
-  el("focusScoreBar").style.width = `${data.focusScore}%`;
+  const focusScoreText = el("focusScoreText");
+  if (focusScoreText) focusScoreText.textContent = data.focusScore || 0;
+  const focusScoreBar = el("focusScoreBar");
+  if (focusScoreBar) focusScoreBar.style.width = `${data.focusScore || 0}%`;
   
   const { currentStreak } = getStreakData();
   data.streak = currentStreak;
@@ -1184,18 +1195,51 @@ function renderTimer() {
   }
 }
 
+function getSubjectStudiedMinutes(subjectName) {
+  if (!userStudySessions || userStudySessions.length === 0) return 0;
+  const target = (subjectName || "").trim().toLowerCase();
+  return userStudySessions
+    .filter(s => (s.subject || "").trim().toLowerCase() === target)
+    .reduce((acc, s) => acc + (Number(s.duration_minutes) || 0), 0);
+}
+
 function renderSubjects() {
   const list = el("subjectList");
+  if (!list || !data || !Array.isArray(data.subjects)) return;
   list.innerHTML = "";
+
+  // Synchronize timerSubjectSelect options as well
+  const timerSubjSelect = el("timerSubjectSelect");
+  if (timerSubjSelect) {
+    const currentVal = timerSubjSelect.value || data.activeTimerSubject || "General";
+    const availableNames = Array.from(new Set(["General", ...data.subjects.map(s => s.name)]));
+    timerSubjSelect.innerHTML = availableNames.map(name => 
+      `<option value="${escapeHtml(name)}"${name === currentVal ? " selected" : ""}>${escapeHtml(name)}</option>`
+    ).join("");
+  }
+
   data.subjects.forEach((subject, index) => {
+    const targetMinutes = Number(subject.targetMinutes) > 0 ? Number(subject.targetMinutes) : 120;
+    subject.targetMinutes = targetMinutes;
+    const studiedMinutes = getSubjectStudiedMinutes(subject.name);
+    const percentage = Math.min(100, Math.round((studiedMinutes / targetMinutes) * 100));
+    subject.value = percentage;
+
+    const color = colorValue(subject.color);
+
     const row = document.createElement("div");
     row.className = "coverage-row";
+    row.style.cssText = "display: grid; grid-template-columns: minmax(105px, 1.2fr) 1fr 45px; align-items: center; gap: 10px; margin-bottom: 8px;";
     row.innerHTML = `
-      <label>${escapeHtml(subject.name)}</label>
-      <input type="range" min="0" max="100" value="${subject.value}" data-subject="${index}" />
-      <span>${subject.value}%</span>
+      <div style="display: flex; flex-direction: column; gap: 2px; overflow: hidden;">
+        <label style="font-weight: 700; font-size: 13px; color: var(--text); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${escapeHtml(subject.name)}</label>
+        <span style="font-size: 10px; color: var(--muted);">${studiedMinutes}m / <button type="button" class="target-mins-btn" data-subject-index="${index}" title="Click to customize target minutes" style="background: none; border: none; padding: 0; color: var(--soft); text-decoration: underline dotted; font-size: 10px; cursor: pointer;">${targetMinutes}m</button></span>
+      </div>
+      <div class="coverage-progress-wrap" style="position: relative; height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; border: 1px solid var(--line);">
+        <div class="coverage-progress-fill" style="height: 100%; width: ${percentage}%; background: ${color}; border-radius: 4px; transition: width 0.3s ease;"></div>
+      </div>
+      <span style="font-size: 12px; font-weight: 700; text-align: right; color: var(--text);">${percentage}%</span>
     `;
-    row.querySelector("input").style.accentColor = colorValue(subject.color);
     list.append(row);
   });
 }
@@ -1525,7 +1569,15 @@ function completeTimerSession() {
     // Log to Supabase study_sessions table
     if (currentSupabaseUser) {
       logStudySession(durationMinutes, activeSubject, "focus");
+    } else {
+      userStudySessions.push({
+        subject: activeSubject,
+        duration_minutes: durationMinutes,
+        session_type: "focus",
+        created_at: new Date().toISOString()
+      });
     }
+    renderSubjects();
 
     data.timerMode = "break";
   } else {
@@ -1536,6 +1588,7 @@ function completeTimerSession() {
   saveUser();
   renderStats();
   renderTimer();
+  renderSubjects();
 }
 
 function playTone(kind) {
@@ -1723,6 +1776,14 @@ function normalizeData(savedData) {
       t.id = "task-" + i + "-" + Date.now();
     }
   });
+
+  if (Array.isArray(normalized.subjects)) {
+    normalized.subjects.forEach((s) => {
+      s.targetMinutes = Number(s.targetMinutes) > 0 ? Number(s.targetMinutes) : 120;
+    });
+  } else {
+    normalized.subjects = defaults.subjects;
+  }
 
   normalized.isHost = currentUser === "host@example.com" || !!normalized.isHost;
   normalized.week = Array.isArray(normalized.week) ? normalized.week.slice(0, 7) : defaults.week;
@@ -5312,11 +5373,14 @@ function bindEvents() {
     });
   }
 
-  el("focusModeButton").addEventListener("click", () => {
-    data.focusMode = !data.focusMode;
-    saveUser();
-    renderAll();
-  });
+  const focusModeBtn = el("focusModeButton");
+  if (focusModeBtn) {
+    focusModeBtn.addEventListener("click", () => {
+      data.focusMode = !data.focusMode;
+      saveUser();
+      renderAll();
+    });
+  }
 
   el("soundButton").addEventListener("click", () => {
     data.sound = !data.sound;
@@ -5396,17 +5460,6 @@ function bindEvents() {
     renderTimer();
   });
 
-  document.querySelectorAll(".stat-card[data-stat]").forEach((card) => {
-    card.addEventListener("click", () => {
-      const stat = card.dataset.stat;
-      if (stat === "focusScore") {
-        data.focusScore = Math.min(100, data.focusScore + 1);
-        saveUser();
-        renderStats();
-      }
-    });
-  });
-
   el("studyGoalInput").addEventListener("change", () => {
     const hours = Number(el("studyGoalInput").value);
     data.studyGoal = Math.max(15, Math.round(hours * 60));
@@ -5421,20 +5474,38 @@ function bindEvents() {
     renderStats();
   });
 
-  el("subjectList").addEventListener("input", (event) => {
-    if (!event.target.matches("[data-subject]")) return;
-    const index = Number(event.target.dataset.subject);
-    data.subjects[index].value = Number(event.target.value);
-    saveUser();
-    renderSubjects();
-  });
+  const subjectList = el("subjectList");
+  if (subjectList) {
+    subjectList.addEventListener("click", (event) => {
+      const targetBtn = event.target.closest(".target-mins-btn");
+      if (!targetBtn) return;
+      const index = Number(targetBtn.dataset.subjectIndex);
+      const subject = data.subjects[index];
+      if (!subject) return;
+
+      const currentTarget = subject.targetMinutes || 120;
+      const input = prompt(`Set study goal for ${subject.name} (in minutes):`, currentTarget);
+      if (input === null) return;
+      const parsed = parseInt(input, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        subject.targetMinutes = parsed;
+        saveUser();
+        renderSubjects();
+      }
+    });
+  }
 
   el("subjectForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const name = el("subjectNameInput").value.trim();
     if (!name) return;
     const colors = ["purple", "mint", "amber", "red"];
-    data.subjects.push({ name, value: 0, color: colors[data.subjects.length % colors.length] });
+    data.subjects.push({
+      name,
+      value: 0,
+      targetMinutes: 120,
+      color: colors[data.subjects.length % colors.length]
+    });
     el("subjectNameInput").value = "";
     saveUser();
     renderSubjects();
@@ -5721,34 +5792,53 @@ function bindEvents() {
   }
 }
 
-bindEvents();
-setAuthMode("login");
+async function initApp() {
+  bindEvents();
 
-if (supabaseClient) {
-  // Fetch public shared resources
-  fetchSharedResources();
+  if (supabaseClient) {
+    // 1. Listen for Supabase auth state changes to keep tokens & state updated
+    supabaseClient.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        currentSupabaseUser = session.user;
+        await login(session.user.email, session.user);
+        closeAuthModal();
+      } else if (event === "SIGNED_OUT") {
+        logout();
+      }
+    });
 
-  // Listen for Supabase auth state changes
-  supabaseClient.auth.onAuthStateChange(async (event, session) => {
-    if (session?.user) {
-      login(session.user.email, session.user);
-    } else if (event === "SIGNED_OUT") {
-      logout();
-    }
-  });
+    // 2. Fetch public shared resources
+    fetchSharedResources();
 
-  // Check active session on startup
-  supabaseClient.auth.getSession().then(({ data: { session } }) => {
-    if (session?.user) {
-      login(session.user.email, session.user);
-    } else if (currentUser && data) {
-      login(currentUser);
+    // 3. Immediately restore session via getSession() inside DOMContentLoaded
+    try {
+      const { data: { session }, error } = await supabaseClient.auth.getSession();
+      if (session?.user) {
+        currentSupabaseUser = session.user;
+        await login(session.user.email, session.user);
+        closeAuthModal();
+        return;
+      }
+    } catch (err) {
+      console.warn("Error restoring Supabase session on startup:", err);
     }
-  }).catch(() => {
-    if (currentUser && data) {
-      login(currentUser);
-    }
-  });
-} else if (currentUser && data) {
-  login(currentUser);
+  }
+
+  // 4. Fallback to local session if present
+  if (currentUser && data) {
+    await login(currentUser);
+    closeAuthModal();
+    return;
+  }
+
+  // 5. If no active session, show the login view
+  setAuthMode("login");
+  if (authView) authView.classList.remove("hidden");
+  if (appView) appView.classList.add("hidden");
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initApp);
+} else {
+  initApp();
 }
