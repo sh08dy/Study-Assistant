@@ -70,72 +70,78 @@
 
         <section id="dashboardPage" class="page-view">
           <section class="dashboard-grid">
-            <article class="panel year-panel">
-              <div class="panel-kicker">Year progress</div>
-              <div class="year-ring" id="yearRing">
-                <div class="day-ring" id="dayRing">
-                  <div class="hour-ring" id="hourRing">
-                    <div class="ring-core">
-                      <strong id="yearPercent">47%</strong>
-                      <span id="daysLeft">195 days left</span>
+            <article class="panel year-panel" id="overviewPanel">
+              <div class="panel-header-row" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                <div class="card-toggle-tabs" id="overviewCardTabs" role="tablist">
+                  <button type="button" class="card-toggle-tab active" id="tabYearProgress" data-view="year">Year Progress</button>
+                  <button type="button" class="card-toggle-tab" id="tabExamCountdown" data-view="countdown">Exam Countdown</button>
+                </div>
+                <button type="button" id="editCountdownBtn" class="edit-countdown-btn hidden" title="Set Exam & Date">✎ Edit</button>
+              </div>
+
+              <!-- View 1: Year Progress -->
+              <div id="yearProgressView" class="view-transition-pane">
+                <div class="year-ring" id="yearRing">
+                  <div class="day-ring" id="dayRing">
+                    <div class="hour-ring" id="hourRing">
+                      <div class="ring-core">
+                        <strong id="yearPercent">47%</strong>
+                        <span id="daysLeft">195 days left</span>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-              <button id="timeButton" class="clock-button" type="button">14:32:08</button>
-              <p id="timezoneLabel">Cairo, EGY · GMT+3</p>
-              <div class="legend">
-                <span><i class="purple"></i>Year</span>
-                <span><i class="mint"></i>Day</span>
-                <span><i class="amber"></i>Hour</span>
-              </div>
-            </article>
-
-            <article class="panel countdown-panel">
-              <div class="panel-header-row" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                <div class="panel-kicker" style="margin-bottom: 0;">Exam Countdown</div>
-                <button type="button" id="editCountdownBtn" class="edit-countdown-btn" title="Set Exam & Date">✎ Edit</button>
+                <button id="timeButton" class="clock-button" type="button">14:32:08</button>
+                <p id="timezoneLabel">Cairo, EGY · GMT+3</p>
+                <div class="legend">
+                  <span><i class="purple"></i>Year</span>
+                  <span><i class="mint"></i>Day</span>
+                  <span><i class="amber"></i>Hour</span>
+                </div>
               </div>
 
-              <!-- Live Clock Section -->
-              <div class="live-clock-card">
-                <span class="live-clock-kicker">Live Local Time</span>
-                <div id="liveClockDigits" class="live-clock-digits">--:--:--</div>
-                <div id="liveClockDate" class="live-clock-date">Loading date...</div>
-              </div>
-
-              <div class="countdown-divider"></div>
-
-              <!-- Exam Countdown Section -->
-              <div class="exam-countdown-card">
-                <div class="countdown-target-header">
-                  <span class="countdown-badge">Target Milestone</span>
-                  <h4 id="countdownExamTitle" class="countdown-exam-title">Upcoming Exam</h4>
+              <!-- View 2: Live Clock & Exam Countdown -->
+              <div id="examCountdownView" class="view-transition-pane hidden" style="display: flex; flex-direction: column; height: 100%;">
+                <!-- Live Clock Section -->
+                <div class="live-clock-card">
+                  <span class="live-clock-kicker">Live Local Time</span>
+                  <div id="liveClockDigits" class="live-clock-digits">--:--:--</div>
+                  <div id="liveClockDate" class="live-clock-date">Loading date...</div>
                 </div>
 
-                <div id="countdownTiles" class="countdown-tiles">
-                  <div class="countdown-tile">
-                    <strong id="cdDays">00</strong>
-                    <span>Days</span>
-                  </div>
-                  <span class="countdown-colon">:</span>
-                  <div class="countdown-tile">
-                    <strong id="cdHours">00</strong>
-                    <span>Hours</span>
-                  </div>
-                  <span class="countdown-colon">:</span>
-                  <div class="countdown-tile">
-                    <strong id="cdMins">00</strong>
-                    <span>Mins</span>
-                  </div>
-                  <span class="countdown-colon">:</span>
-                  <div class="countdown-tile">
-                    <strong id="cdSecs">00</strong>
-                    <span>Secs</span>
-                  </div>
-                </div>
+                <div class="countdown-divider"></div>
 
-                <p id="countdownTargetDateStr" class="countdown-target-date">Target: Set date</p>
+                <!-- Exam Countdown Section -->
+                <div class="exam-countdown-card">
+                  <div class="countdown-target-header">
+                    <span class="countdown-badge">Target Milestone</span>
+                    <h4 id="countdownExamTitle" class="countdown-exam-title">Upcoming Exam</h4>
+                  </div>
+
+                  <div id="countdownTiles" class="countdown-tiles">
+                    <div class="countdown-tile">
+                      <strong id="cdDays">00</strong>
+                      <span>Days</span>
+                    </div>
+                    <span class="countdown-colon">:</span>
+                    <div class="countdown-tile">
+                      <strong id="cdHours">00</strong>
+                      <span>Hours</span>
+                    </div>
+                    <span class="countdown-colon">:</span>
+                    <div class="countdown-tile">
+                      <strong id="cdMins">00</strong>
+                      <span>Mins</span>
+                    </div>
+                    <span class="countdown-colon">:</span>
+                    <div class="countdown-tile">
+                      <strong id="cdSecs">00</strong>
+                      <span>Secs</span>
+                    </div>
+                  </div>
+
+                  <p id="countdownTargetDateStr" class="countdown-target-date">Target: Set date</p>
+                </div>
               </div>
             </article>
 

@@ -277,7 +277,7 @@ button {
   max-width: 1260px;
   margin: 20px auto 0;
   display: grid;
-  grid-template-columns: repeat(12, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
 }
 
@@ -302,38 +302,54 @@ button {
 }
 
 .year-panel {
-  grid-column: span 3;
   min-height: 440px;
   text-align: center;
-}
-
-.countdown-panel {
-  grid-column: span 3;
-  min-height: 440px;
-  display: flex;
-  flex-direction: column;
 }
 
 .timer-panel {
-  grid-column: span 3;
   min-height: 440px;
   text-align: center;
 }
 
-.stats-stack {
-  grid-column: span 3;
+/* Overview Card Toggle Tabs (Year Progress / Exam Countdown) */
+.card-toggle-tabs {
+  display: inline-flex;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 3px;
 }
 
-.coverage-panel {
-  grid-column: span 4;
+.card-toggle-tab {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-.streak-panel {
-  grid-column: span 4;
+.card-toggle-tab:hover {
+  color: var(--text);
 }
 
-.tasks-panel {
-  grid-column: span 4;
+.card-toggle-tab.active {
+  background: var(--purple);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(124, 103, 255, 0.35);
+}
+
+.view-transition-pane {
+  animation: fadeInPane 0.2s ease-in-out;
+}
+
+@keyframes fadeInPane {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* Clock & Exam Countdown Styling */

@@ -130,7 +130,8 @@ const defaultData = () => ({
   targetExam: {
     title: "USMLE Step 1 Exam",
     targetDate: "2026-11-15T09:00"
-  }
+  },
+  overviewCardView: "year"
 });
 
 // Supabase Cloud Configuration
@@ -171,7 +172,21 @@ const appView = el("appView");
 // ----------------------------------------------------
 let appDialogResolver = null;
 
-function showAppAlert(message, title = "Notice") {
+function showAppAlert(messageOrOptions, maybeTitle = "Notice", maybeConfirmText = "OK") {
+  let title = "Notice";
+  let message = "";
+  let confirmText = "OK";
+
+  if (typeof messageOrOptions === "object" && messageOrOptions !== null) {
+    title = messageOrOptions.title || title;
+    message = messageOrOptions.message || "";
+    confirmText = messageOrOptions.confirmText || confirmText;
+  } else {
+    message = String(messageOrOptions || "");
+    title = maybeTitle || "Notice";
+    confirmText = maybeConfirmText || "OK";
+  }
+
   return new Promise((resolve) => {
     const modal = el("appDialogModal");
     if (!modal) {
@@ -185,11 +200,11 @@ function showAppAlert(message, title = "Notice") {
     const confirmBtn = el("appDialogConfirmBtn");
 
     if (titleEl) titleEl.textContent = title;
-    if (msgEl) msgEl.textContent = String(message || "");
+    if (msgEl) msgEl.textContent = message;
     if (inputWrapper) inputWrapper.classList.add("hidden");
     if (cancelBtn) cancelBtn.classList.add("hidden");
     if (confirmBtn) {
-      confirmBtn.textContent = "OK";
+      confirmBtn.textContent = confirmText;
       confirmBtn.classList.remove("hidden");
     }
     modal.classList.remove("hidden");
@@ -202,7 +217,24 @@ function showAppAlert(message, title = "Notice") {
   });
 }
 
-function showAppConfirm(message, title = "Confirm", confirmText = "Confirm", cancelText = "Cancel") {
+function showAppConfirm(messageOrOptions, maybeTitle = "Confirm", maybeConfirmText = "Confirm", maybeCancelText = "Cancel") {
+  let title = "Confirm";
+  let message = "";
+  let confirmText = "Confirm";
+  let cancelText = "Cancel";
+
+  if (typeof messageOrOptions === "object" && messageOrOptions !== null) {
+    title = messageOrOptions.title || title;
+    message = messageOrOptions.message || "";
+    confirmText = messageOrOptions.confirmText || confirmText;
+    cancelText = messageOrOptions.cancelText || cancelText;
+  } else {
+    message = String(messageOrOptions || "");
+    title = maybeTitle || "Confirm";
+    confirmText = maybeConfirmText || "Confirm";
+    cancelText = maybeCancelText || "Cancel";
+  }
+
   return new Promise((resolve) => {
     const modal = el("appDialogModal");
     if (!modal) {
@@ -216,7 +248,7 @@ function showAppConfirm(message, title = "Confirm", confirmText = "Confirm", can
     const confirmBtn = el("appDialogConfirmBtn");
 
     if (titleEl) titleEl.textContent = title;
-    if (msgEl) msgEl.textContent = String(message || "");
+    if (msgEl) msgEl.textContent = message;
     if (inputWrapper) inputWrapper.classList.add("hidden");
     if (cancelBtn) {
       cancelBtn.textContent = cancelText;
@@ -236,7 +268,35 @@ function showAppConfirm(message, title = "Confirm", confirmText = "Confirm", can
   });
 }
 
-function showAppPrompt({ title = "Input", message = "", defaultValue = "", placeholder = "", inputType = "text", suffix = "", confirmText = "Save", cancelText = "Cancel" } = {}) {
+function showAppPrompt(optionsOrTitle = {}, maybeMessage = "", maybeDefaultValue = "", maybePlaceholder = "", maybeInputType = "text", maybeConfirmText = "Save", maybeCancelText = "Cancel") {
+  let title = "Input";
+  let message = "";
+  let defaultValue = "";
+  let placeholder = "";
+  let inputType = "text";
+  let suffix = "";
+  let confirmText = "Save";
+  let cancelText = "Cancel";
+
+  if (typeof optionsOrTitle === "object" && optionsOrTitle !== null) {
+    title = optionsOrTitle.title || title;
+    message = optionsOrTitle.message || message;
+    defaultValue = optionsOrTitle.defaultValue !== undefined && optionsOrTitle.defaultValue !== null ? optionsOrTitle.defaultValue : defaultValue;
+    placeholder = optionsOrTitle.placeholder || placeholder;
+    inputType = optionsOrTitle.inputType || inputType;
+    suffix = optionsOrTitle.suffix || suffix;
+    confirmText = optionsOrTitle.confirmText || confirmText;
+    cancelText = optionsOrTitle.cancelText || cancelText;
+  } else {
+    title = String(optionsOrTitle || "Input");
+    message = maybeMessage || "";
+    defaultValue = maybeDefaultValue !== undefined && maybeDefaultValue !== null ? maybeDefaultValue : "";
+    placeholder = maybePlaceholder || "";
+    inputType = maybeInputType || "text";
+    confirmText = maybeConfirmText || "Save";
+    cancelText = maybeCancelText || "Cancel";
+  }
+
   return new Promise((resolve) => {
     const modal = el("appDialogModal");
     if (!modal) {
@@ -280,8 +340,10 @@ function showAppPrompt({ title = "Input", message = "", defaultValue = "", place
     }
     modal.classList.remove("hidden");
     if (input) {
-      input.focus();
-      input.select();
+      setTimeout(() => {
+        input.focus();
+        input.select();
+      }, 50);
     }
 
     appDialogResolver = (confirmed) => {
@@ -1190,9 +1252,7 @@ async function logout() {
 
 function renderAll() {
   renderDate();
-  renderLiveClock();
-  renderExamCountdown();
-  renderProgress();
+  setOverviewCardView(data && data.overviewCardView ? data.overviewCardView : "year");
   renderStats();
   renderTimer();
   renderSubjects();
@@ -1289,6 +1349,44 @@ function renderExamCountdown() {
   if (minsEl) minsEl.textContent = String(mins).padStart(2, "0");
   if (secsEl) secsEl.textContent = String(secs).padStart(2, "0");
 }
+
+function setOverviewCardView(view) {
+  const selectedView = view === "countdown" ? "countdown" : "year";
+  if (data) {
+    data.overviewCardView = selectedView;
+    saveUser();
+  }
+
+  const yearTab = el("tabYearProgress");
+  const cdTab = el("tabExamCountdown");
+  const yearView = el("yearProgressView");
+  const cdView = el("examCountdownView");
+  const editBtn = el("editCountdownBtn");
+
+  if (selectedView === "countdown") {
+    if (yearTab) yearTab.classList.remove("active");
+    if (cdTab) cdTab.classList.add("active");
+    if (yearView) yearView.classList.add("hidden");
+    if (cdView) {
+      cdView.classList.remove("hidden");
+      cdView.style.display = "flex";
+    }
+    if (editBtn) editBtn.classList.remove("hidden");
+    renderLiveClock();
+    renderExamCountdown();
+  } else {
+    if (yearTab) yearTab.classList.add("active");
+    if (cdTab) cdTab.classList.remove("active");
+    if (yearView) yearView.classList.remove("hidden");
+    if (cdView) {
+      cdView.classList.add("hidden");
+      cdView.style.display = "none";
+    }
+    if (editBtn) editBtn.classList.add("hidden");
+    renderProgress();
+  }
+}
+window.setOverviewCardView = setOverviewCardView;
 
 function updateTimezoneLabel() {
   try {
@@ -1417,6 +1515,33 @@ function getSubjectStudiedMinutes(subjectName) {
     .reduce((acc, s) => acc + (Number(s.duration_minutes) || 0), 0);
 }
 
+async function promptChangeSubjectTargetTime(subjectIndex) {
+  const index = Number(subjectIndex);
+  if (isNaN(index) || !data || !data.subjects || !data.subjects[index]) return;
+  const subject = data.subjects[index];
+  const currentTarget = subject.targetMinutes || 120;
+
+  const input = await showAppPrompt({
+    title: "Set Study Goal",
+    message: `Set target study time for ${subject.name} (in minutes):`,
+    defaultValue: currentTarget,
+    placeholder: "Minutes (e.g. 120)",
+    inputType: "number",
+    suffix: "mins",
+    confirmText: "Save Goal",
+    cancelText: "Cancel"
+  });
+
+  if (input === null || input === undefined || input === "") return;
+  const parsed = parseInt(String(input).trim(), 10);
+  if (!isNaN(parsed) && parsed > 0) {
+    subject.targetMinutes = parsed;
+    saveUser();
+    renderSubjects();
+  }
+}
+window.promptChangeSubjectTargetTime = promptChangeSubjectTargetTime;
+
 function renderSubjects() {
   const list = el("subjectList");
   if (!list || !data || !Array.isArray(data.subjects)) return;
@@ -1447,13 +1572,23 @@ function renderSubjects() {
     row.innerHTML = `
       <div style="display: flex; flex-direction: column; gap: 2px; overflow: hidden;">
         <label style="font-weight: 700; font-size: 13px; color: var(--text); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${escapeHtml(subject.name)}</label>
-        <span style="font-size: 10px; color: var(--muted);">${studiedMinutes}m / <button type="button" class="target-mins-btn" data-subject-index="${index}" title="Click to customize target minutes" style="background: none; border: none; padding: 0; color: var(--soft); text-decoration: underline dotted; font-size: 10px; cursor: pointer;">${targetMinutes}m</button></span>
+        <span style="font-size: 10px; color: var(--muted);">${studiedMinutes}m / <button type="button" class="target-mins-btn" data-subject-index="${index}" onclick="promptChangeSubjectTargetTime(${index})" title="Click to customize target minutes" style="background: none; border: none; padding: 0; color: var(--soft); text-decoration: underline dotted; font-size: 10px; cursor: pointer;">${targetMinutes}m</button></span>
       </div>
       <div class="coverage-progress-wrap" style="position: relative; height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; border: 1px solid var(--line);">
         <div class="coverage-progress-fill" style="height: 100%; width: ${percentage}%; background: ${color}; border-radius: 4px; transition: width 0.3s ease;"></div>
       </div>
       <span style="font-size: 12px; font-weight: 700; text-align: right; color: var(--text);">${percentage}%</span>
     `;
+
+    const targetBtn = typeof row.querySelector === "function" ? row.querySelector(".target-mins-btn") : null;
+    if (targetBtn) {
+      targetBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        promptChangeSubjectTargetTime(index);
+      });
+    }
+
     list.append(row);
   });
 }
@@ -1766,6 +1901,7 @@ function completeTimerSession() {
   playTone("complete");
   if (data.timerMode === "focus") {
     const totalSessionDurationSeconds = getTimerDuration("focus");
+    const remainingSeconds = Math.max(0, data.timerRemaining !== undefined ? data.timerRemaining : 0);
     const actualSecondsElapsed = totalSessionDurationSeconds - remainingSeconds;
     const actualMinutes = Math.floor(actualSecondsElapsed / 60);
 
@@ -1812,7 +1948,12 @@ function completeTimerSession() {
   renderStats();
   renderTimer();
   renderSubjects();
+  if (typeof renderSubjectCoverage === "function") renderSubjectCoverage();
 }
+
+const renderSubjectCoverage = () => renderSubjects();
+window.renderSubjectCoverage = renderSubjectCoverage;
+window.completeTimerSession = completeTimerSession;
 
 function playTone(kind) {
   if (!data.sound) return;
@@ -1993,11 +2134,12 @@ function normalizeData(savedData) {
     "#ffb329": "Other"
   };
 
-  // Assure targetExam exists
+  // Assure targetExam and overviewCardView exist
   normalized.targetExam = normalized.targetExam || {
     title: "USMLE Step 1 Exam",
     targetDate: "2026-11-15T09:00"
   };
+  normalized.overviewCardView = normalized.overviewCardView || "year";
 
   // Assure all tasks have unique IDs
   normalized.tasks.forEach((t, i) => {
@@ -5663,11 +5805,26 @@ function bindEvents() {
     renderTimer();
   });
 
-  el("skipTimer").addEventListener("click", () => {
-    completeTimerSession();
-    saveUser();
-    renderAll();
-  });
+  const skipBtn = el("skipTimer");
+  if (skipBtn) {
+    skipBtn.addEventListener("click", () => {
+      completeTimerSession();
+    });
+  }
+
+  // Overview Card View Toggle (Year Progress / Exam Countdown)
+  const tabYear = el("tabYearProgress");
+  if (tabYear) {
+    tabYear.addEventListener("click", () => {
+      setOverviewCardView("year");
+    });
+  }
+  const tabCountdown = el("tabExamCountdown");
+  if (tabCountdown) {
+    tabCountdown.addEventListener("click", () => {
+      setOverviewCardView("countdown");
+    });
+  }
 
   el("focusMinInput").addEventListener("input", (e) => {
     const val = Math.max(1, parseInt(e.target.value) || 1);
@@ -5723,32 +5880,24 @@ function bindEvents() {
 
   const subjectList = el("subjectList");
   if (subjectList) {
-    subjectList.addEventListener("click", async (event) => {
+    subjectList.addEventListener("click", (event) => {
       const targetBtn = event.target.closest(".target-mins-btn");
       if (!targetBtn) return;
-      const index = Number(targetBtn.dataset.subjectIndex);
-      const subject = data.subjects[index];
-      if (!subject) return;
-
-      const currentTarget = subject.targetMinutes || 120;
-      const input = await showAppPrompt({
-        title: "Set Study Goal",
-        message: `Set target study time for ${subject.name} (in minutes):`,
-        defaultValue: currentTarget,
-        placeholder: "Minutes (e.g. 120)",
-        inputType: "number",
-        suffix: "mins",
-        confirmText: "Save Goal"
-      });
-      if (input === null) return;
-      const parsed = parseInt(input, 10);
-      if (!isNaN(parsed) && parsed > 0) {
-        subject.targetMinutes = parsed;
-        saveUser();
-        renderSubjects();
-      }
+      event.preventDefault();
+      event.stopPropagation();
+      promptChangeSubjectTargetTime(targetBtn.dataset.subjectIndex);
     });
   }
+
+  // Global delegation for target-mins-btn
+  document.addEventListener("click", (event) => {
+    const targetBtn = event.target.closest(".target-mins-btn");
+    if (targetBtn && targetBtn.dataset.subjectIndex !== undefined) {
+      event.preventDefault();
+      event.stopPropagation();
+      promptChangeSubjectTargetTime(targetBtn.dataset.subjectIndex);
+    }
+  });
 
   el("subjectForm").addEventListener("submit", (event) => {
     event.preventDefault();
@@ -6091,6 +6240,15 @@ function bindEvents() {
         if (appDialogResolver) appDialogResolver(true);
       } else if (e.key === "Escape") {
         e.preventDefault();
+        if (appDialogResolver) appDialogResolver(false);
+      }
+    });
+  }
+
+  const appDialogModal = el("appDialogModal");
+  if (appDialogModal) {
+    appDialogModal.addEventListener("click", (e) => {
+      if (e.target === appDialogModal) {
         if (appDialogResolver) appDialogResolver(false);
       }
     });
