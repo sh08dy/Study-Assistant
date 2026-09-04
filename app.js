@@ -964,8 +964,10 @@ async function login(email, supabaseUser = null) {
   
   db.users[email].data = data;
   saveDb();
-  if (authView) authView.classList.add("hidden");
-  if (appView) appView.classList.remove("hidden");
+  const authEl = el("authView") || authView;
+  const appEl = el("appView") || appView;
+  if (authEl) authEl.classList.add("hidden");
+  if (appEl) appEl.classList.remove("hidden");
   closeAuthModal();
 
   // Update avatar & tooltips
@@ -1046,8 +1048,10 @@ async function logout() {
     userBtn.title = "Account (Not logged in)";
   }
 
-  appView.classList.add("hidden");
-  authView.classList.remove("hidden");
+  const appEl = el("appView") || appView;
+  const authEl = el("authView") || authView;
+  if (appEl) appEl.classList.add("hidden");
+  if (authEl) authEl.classList.remove("hidden");
   setMessage("");
 }
 
@@ -2623,41 +2627,45 @@ async function renderFileReaderTab() {
   }
 
   // Clear inputs
-  el("personalNotesInput").value = "";
+  if (el("personalNotesInput")) el("personalNotesInput").value = "";
   if (el("hostNotesInput")) el("hostNotesInput").value = "";
 
   // 1. Render Personal Notes
   const personalList = el("personalNotesList");
-  personalList.innerHTML = "";
-  
-  const personalNotes = data.notesList || [];
-  if (personalNotes.length === 0) {
-    personalList.innerHTML = `<div class="empty-state-small" style="font-size: 11px; color: var(--muted); text-align: center; padding: 12px 0;">No personal notes uploaded yet.</div>`;
-  } else {
-    personalNotes.forEach((note) => {
-      const item = document.createElement("div");
-      const key = `notes:personal:${currentUser}:${note.filename}`;
-      item.className = `notes-file-item ${activeNoteKey === key ? "active" : ""}`;
-      
-      const sizeStr = (note.size / (1024 * 1024)).toFixed(2) + " MB";
-      
-      item.innerHTML = `
-        <div class="notes-file-info" onclick="viewNote('${key}', '${escapeHtml(note.filename)}')">
-          <span class="notes-file-icon">🖹</span>
-          <div class="notes-file-meta">
-            <span class="notes-file-name" title="${escapeHtml(note.filename)}">${escapeHtml(note.filename)}</span>
-            <span class="notes-file-details">${sizeStr} · ${new Date(note.timestamp).toLocaleDateString()}</span>
+  if (personalList) {
+    personalList.innerHTML = "";
+    
+    const personalNotes = data.notesList || [];
+    if (personalNotes.length === 0) {
+      personalList.innerHTML = `<div class="empty-state-small" style="font-size: 11px; color: var(--muted); text-align: center; padding: 12px 0;">No personal notes uploaded yet.</div>`;
+    } else {
+      personalNotes.forEach((note) => {
+        const item = document.createElement("div");
+        const key = `notes:personal:${currentUser}:${note.filename}`;
+        item.className = `notes-file-item ${activeNoteKey === key ? "active" : ""}`;
+        
+        const sizeStr = (note.size / (1024 * 1024)).toFixed(2) + " MB";
+        
+        item.innerHTML = `
+          <div class="notes-file-info" onclick="viewNote('${key}', '${escapeHtml(note.filename)}')">
+            <span class="notes-file-icon">🖹</span>
+            <div class="notes-file-meta">
+              <span class="notes-file-name" title="${escapeHtml(note.filename)}">${escapeHtml(note.filename)}</span>
+              <span class="notes-file-details">${sizeStr} · ${new Date(note.timestamp).toLocaleDateString()}</span>
+            </div>
           </div>
-        </div>
-        <button class="notes-file-delete" type="button" onclick="deletePersonalNote('${escapeHtml(note.filename)}', event)" title="Delete note">✕</button>
-      `;
-      personalList.append(item);
-    });
+          <button class="notes-file-delete" type="button" onclick="deletePersonalNote('${escapeHtml(note.filename)}', event)" title="Delete note">✕</button>
+        `;
+        personalList.append(item);
+      });
+    }
   }
 
   // 2. Render Shared References (Global Host Files)
   const sharedList = el("sharedNotesList");
-  sharedList.innerHTML = "";
+  if (sharedList) {
+    sharedList.innerHTML = "";
+  }
 
   let allKeys = [];
   try {
@@ -4723,16 +4731,19 @@ function closeActiveNote() {
     focusBtn.classList.add("hidden");
   }
 
-  el("activeNoteTitle").textContent = "No Document Selected";
-  el("closeNoteBtn").classList.add("hidden");
+  if (el("activeNoteTitle")) el("activeNoteTitle").textContent = "No Document Selected";
+  if (el("closeNoteBtn")) el("closeNoteBtn").classList.add("hidden");
 
-  el("notesViewerContainer").innerHTML = `
-    <div class="notes-empty-state">
-      <div class="empty-icon">🗀</div>
-      <h3>Ready to read?</h3>
-      <p>Select a shared reference or upload your own study guide PDF to start reading right here.</p>
-    </div>
-  `;
+  const notesViewerContainer = el("notesViewerContainer");
+  if (notesViewerContainer) {
+    notesViewerContainer.innerHTML = `
+      <div class="notes-empty-state">
+        <div class="empty-icon">🗀</div>
+        <h3>Ready to read?</h3>
+        <p>Select a shared reference or upload your own study guide PDF to start reading right here.</p>
+      </div>
+    `;
+  }
   renderFileReaderTab();
 }
 
@@ -5373,9 +5384,9 @@ function bindEvents() {
     });
   }
 
-  const focusModeBtn = el("focusModeButton");
-  if (focusModeBtn) {
-    focusModeBtn.addEventListener("click", () => {
+  const focusBtn = document.getElementById("focusModeButton");
+  if (focusBtn) {
+    focusBtn.addEventListener("click", () => {
       data.focusMode = !data.focusMode;
       saveUser();
       renderAll();
@@ -5636,54 +5647,57 @@ function bindEvents() {
   }
 
   // Notes File Manager listeners
-  el("personalNotesInput").addEventListener("change", async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+  const personalNotesInput = document.getElementById("personalNotesInput");
+  if (personalNotesInput) {
+    personalNotesInput.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
 
-    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-      alert("Please select a PDF file.");
-      e.target.value = "";
-      return;
-    }
-
-    const filename = file.name;
-    const key = `notes:personal:${currentUser}:${filename}`;
-    
-    const exists = (data.notesList || []).some(n => n.filename === filename);
-    if (exists) {
-      if (!confirm(`A file named "${filename}" already exists. Do you want to overwrite it?`)) {
+      if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+        alert("Please select a PDF file.");
         e.target.value = "";
         return;
       }
-    }
 
-    try {
-      await idb.set(key, file);
+      const filename = file.name;
+      const key = `notes:personal:${currentUser}:${filename}`;
       
-      if (!data.notesList) data.notesList = [];
-      if (!exists) {
-        data.notesList.push({
-          filename: filename,
-          size: file.size,
-          timestamp: Date.now()
-        });
-      } else {
-        const noteIdx = data.notesList.findIndex(n => n.filename === filename);
-        if (noteIdx !== -1) {
-          data.notesList[noteIdx].size = file.size;
-          data.notesList[noteIdx].timestamp = Date.now();
+      const exists = (data.notesList || []).some(n => n.filename === filename);
+      if (exists) {
+        if (!confirm(`A file named "${filename}" already exists. Do you want to overwrite it?`)) {
+          e.target.value = "";
+          return;
         }
       }
 
-      saveUser();
-      renderFileReaderTab();
-    } catch (err) {
-      console.error("Failed to upload note:", err);
-      alert("Error saving note: " + err.message);
-    }
-  });
+      try {
+        await idb.set(key, file);
+        
+        if (!data.notesList) data.notesList = [];
+        if (!exists) {
+          data.notesList.push({
+            filename: filename,
+            size: file.size,
+            timestamp: Date.now()
+          });
+        } else {
+          const noteIdx = data.notesList.findIndex(n => n.filename === filename);
+          if (noteIdx !== -1) {
+            data.notesList[noteIdx].size = file.size;
+            data.notesList[noteIdx].timestamp = Date.now();
+          }
+        }
 
-  const hostNotesInput = el("hostNotesInput");
+        saveUser();
+        renderFileReaderTab();
+      } catch (err) {
+        console.error("Failed to upload note:", err);
+        alert("Error saving note: " + err.message);
+      }
+    });
+  }
+
+  const hostNotesInput = document.getElementById("hostNotesInput");
   if (hostNotesInput) {
     hostNotesInput.addEventListener("change", async (e) => {
       const file = e.target.files[0];
@@ -5713,7 +5727,10 @@ function bindEvents() {
     });
   }
 
-  el("closeNoteBtn").addEventListener("click", closeActiveNote);
+  const closeNoteBtn = document.getElementById("closeNoteBtn");
+  if (closeNoteBtn) {
+    closeNoteBtn.addEventListener("click", closeActiveNote);
+  }
 
   const notesFocusToggleBtn = el("notesFocusToggleBtn");
   if (notesFocusToggleBtn) {
@@ -5777,8 +5794,10 @@ function bindEvents() {
   const downloadBtn = el("downloadNoteBtn");
   if (downloadBtn) {
     downloadBtn.addEventListener("click", () => {
-      const title = el("noteTitleInput").value || "note";
-      const content = el("noteContentTextarea").value || "";
+      const titleInput = el("noteTitleInput");
+      const contentTextarea = el("noteContentTextarea");
+      const title = titleInput ? titleInput.value : "note";
+      const content = contentTextarea ? contentTextarea.value : "";
       const blob = new Blob([content], { type: "text/markdown;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -5833,8 +5852,10 @@ async function initApp() {
 
   // 5. If no active session, show the login view
   setAuthMode("login");
-  if (authView) authView.classList.remove("hidden");
-  if (appView) appView.classList.add("hidden");
+  const authEl = el("authView") || authView;
+  const appEl = el("appView") || appView;
+  if (authEl) authEl.classList.remove("hidden");
+  if (appEl) appEl.classList.add("hidden");
 }
 
 if (document.readyState === "loading") {
