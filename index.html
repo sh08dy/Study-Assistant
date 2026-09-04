@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Study Assistant</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fzstd/umd/index.js"></script>
+  </head>
+  <body>
+    <main id="authView" class="auth-shell">
+      <section class="auth-panel">
+        <div class="brand-mark">SA</div>
+        <h1>Study Assistant</h1>
+        <p>Keep your study sessions, progress, flashcards, and tasks in one focused workspace.</p>
+
+        <div class="auth-tabs" role="tablist" aria-label="Authentication mode">
+          <button id="loginTab" class="active" type="button">Login</button>
+          <button id="signupTab" type="button">Create account</button>
+        </div>
+
+        <form id="authForm" class="auth-form">
+          <label id="nameField" class="hidden">
+            Name
+            <input id="nameInput" type="text" autocomplete="name" />
+          </label>
+          <label>
+            Email
+            <input id="emailInput" type="email" autocomplete="email" required />
+          </label>
+          <label>
+            Password
+            <input id="passwordInput" type="password" autocomplete="current-password" required minlength="4" />
+          </label>
+          <button id="authSubmit" class="primary-action" type="submit">Login</button>
+          <p id="authMessage" class="form-message" role="status"></p>
+        </form>
+      </section>
+    </main>
+
+    <main id="appView" class="app-shell hidden">
+      <aside class="sidebar" aria-label="Study sections">
+        <button class="nav-item active" data-page="Dashboard" title="Dashboard">✽</button>
+        <button class="nav-item" data-page="Flashcards" title="Flashcards">◈</button>
+        <button class="nav-item" data-page="File Reader" title="File Reader">▤</button>
+        <button class="nav-item" data-page="Notes" title="Notes">✎</button>
+        <button class="nav-item" data-page="Calendar" title="Calendar">◷</button>
+        <span class="nav-divider"></span>
+        <button class="nav-item" data-page="Analytics" title="Analytics">▥</button>
+        <button class="nav-item" data-page="Library" title="Library">▧</button>
+        <div class="sidebar-bottom">
+            <button id="settingsButton" class="nav-item" title="Settings">⚙</button>
+          <button id="userButton" class="avatar" title="Account">SA</button>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <h2 id="pageTitle">Dashboard</h2>
+            <p id="dateLabel">Friday, Jun 19 2026</p>
+          </div>
+          <div class="top-actions">
+            <button id="focusModeButton" class="pill active" type="button"><span></span> Focus mode</button>
+            <button id="streakButton" class="pill" type="button">♢ <strong id="topStreak">0</strong> day streak</button>
+            <button id="soundButton" class="icon-pill" type="button" title="Toggle sound">♬</button>
+            <button id="logoutButton" class="icon-pill danger" type="button" title="Logout">↳</button>
+          </div>
+        </header>
+
+        <section id="dashboardPage" class="page-view">
+          <section class="dashboard-grid">
+            <article class="panel year-panel">
+              <div class="panel-kicker">Year progress</div>
+              <div class="year-ring" id="yearRing">
+                <div class="day-ring" id="dayRing">
+                  <div class="hour-ring" id="hourRing">
+                    <div class="ring-core">
+                      <strong id="yearPercent">47%</strong>
+                      <span id="daysLeft">195 days left</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <button id="timeButton" class="clock-button" type="button">14:32:08</button>
+              <p id="timezoneLabel">Cairo, EGY · GMT+3</p>
+              <div class="legend">
+                <span><i class="purple"></i>Year</span>
+                <span><i class="mint"></i>Day</span>
+                <span><i class="amber"></i>Hour</span>
+              </div>
+            </article>
+
+            <article class="panel timer-panel">
+              <div class="panel-kicker">Pomodoro timer</div>
+              <div class="timer-tabs">
+                <button class="timer-mode active" data-mode="focus" type="button">Focus</button>
+                <button class="timer-mode" data-mode="break" type="button">Break</button>
+              </div>
+              <div class="timer-ring" id="timerRing">
+                <div>
+                  <strong id="timerText">18:42</strong>
+                  <span id="timerState">Focusing</span>
+                </div>
+              </div>
+              <div class="timer-controls">
+                <button id="resetTimer" class="round-button" type="button" title="Reset">↻</button>
+                <button id="playTimer" class="main-play" type="button" title="Start or pause">Ⅱ</button>
+                <button id="skipTimer" class="round-button" type="button" title="Skip">▷</button>
+              </div>
+              <div id="sessionDots" class="session-dots"></div>
+              <p id="sessionLabel">Session 3 of 4</p>
+
+              <div class="timer-settings">
+                <div class="setting-row">
+                  <label for="focusMinInput">Focus</label>
+                  <div class="setting-row-input-wrapper">
+                    <input id="focusMinInput" type="number" min="1" max="180" step="1" value="25" aria-label="Focus time in minutes" />
+                    <span>m</span>
+                  </div>
+                </div>
+                <div class="setting-row">
+                  <label for="breakMinInput">Break</label>
+                  <div class="setting-row-input-wrapper">
+                    <input id="breakMinInput" type="number" min="1" max="120" step="1" value="5" aria-label="Break time in minutes" />
+                    <span>m</span>
+                  </div>
+                </div>
+                <div class="setting-row">
+                  <label for="targetSessionsInput">Goal</label>
+                  <div class="setting-row-input-wrapper">
+                    <input id="targetSessionsInput" type="number" min="1" max="24" step="1" value="4" aria-label="Target daily sessions count" />
+                    <span>s</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <section class="stats-stack">
+              <div class="stat-card study-card" data-stat="studyTime">
+                <span>Study time today <b>◴</b></span>
+                <strong id="studyTimeText">3h 40m</strong>
+                <i><em id="studyProgressBar"></em></i>
+                <label class="goal-control">
+                  <small id="studyGoalText">Goal: 6h · 61%</small>
+                  <input id="studyGoalInput" type="number" min="0.25" max="24" step="0.25" value="6" aria-label="Daily study goal in hours" />
+                </label>
+              </div>
+              <div class="stat-card" data-stat="flashcards">
+                <span>Flashcards reviewed <b>♧</b></span>
+                <strong id="flashcardsText">0</strong>
+                <i><em id="flashcardsBar"></em></i>
+                <div class="flashcard-stats-info" style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 11px; color: var(--muted);">
+                  <span id="flashcardAvgTime">Avg time: 0s</span>
+                  <span id="flashcardsGoalText">Goal: 50 · 0%</span>
+                </div>
+                <label class="goal-control">
+                  <small style="color: var(--muted);">Set Daily Goal:</small>
+                  <input id="flashcardsGoalInput" type="number" min="5" max="1000" step="5" value="50" aria-label="Daily flashcard goal" />
+                </label>
+              </div>
+              <div class="stat-card" data-stat="focusScore">
+                <span>Focus score <b>⚡</b></span>
+                <strong><span id="focusScoreText">87</span><small>/100</small></strong>
+                <i><em id="focusScoreBar"></em></i>
+                <small>↑ 12 pts from yesterday</small>
+              </div>
+              <div class="stat-card" data-stat="streak">
+                <span>Current streak <b>♨</b></span>
+                <strong><span id="streakText">0</span> <small>days</small></strong>
+                <small id="bestStreakText">Best: 0 days</small>
+              </div>
+            </section>
+
+            <article class="panel coverage-panel">
+              <div class="panel-kicker">Subject coverage</div>
+              <div id="subjectList" class="subject-list"></div>
+              <form id="subjectForm" class="inline-form">
+                <input id="subjectNameInput" type="text" placeholder="Add subject" />
+                <button type="submit">+</button>
+              </form>
+            </article>
+
+            <article class="panel streak-panel">
+              <div class="panel-kicker">Streak</div>
+              <div class="segmented">
+                <button id="weeklyButton" class="active" type="button">Weekly</button>
+                <button id="monthlyButton" type="button">Monthly</button>
+              </div>
+              <div id="weekGrid" class="week-grid"></div>
+              <div class="streak-metrics">
+                <button data-metric="days" type="button"><strong id="metricDays">5</strong><span>days</span></button>
+                <button data-metric="hours" type="button"><strong id="metricHours">22h</strong><span>total</span></button>
+                <button data-metric="sessions" type="button"><strong id="metricSessions">18</strong><span>sessions</span></button>
+              </div>
+            </article>
+
+            <article class="panel tasks-panel">
+              <div class="panel-kicker">Today's tasks</div>
+              <div id="taskList" class="task-list"></div>
+              <form id="taskForm" class="inline-form">
+                <input id="taskInput" type="text" placeholder="Add task" />
+                <select id="taskTagInput" aria-label="Subject tag">
+                  <option>Path</option>
+                  <option>Pharm</option>
+                  <option>Exam</option>
+                  <option>Review</option>
+                </select>
+                <select id="taskColorInput" aria-label="Task color" style="padding: 6px; font-size: 11px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); outline: none; cursor: pointer;">
+                  <option value="#ff6e79">Red (Default)</option>
+                  <option value="#7c67ff">Purple</option>
+                  <option value="#58ddd2">Mint</option>
+                  <option value="#ffb329">Amber</option>
+                </select>
+                <button type="submit">+</button>
+              </form>
+            </article>
+          </section>
+        </section>
+
+        <section id="flashcardsPage" class="page-view hidden">
+          <div class="flashcards-layout">
+            <aside class="panel library-panel" id="libraryPanel">
+              <div class="library-panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; width: 100%;">
+                <div class="panel-kicker" style="margin-bottom: 0;">Anki Library</div>
+                <button type="button" id="sidebarToggleBtn" class="sidebar-toggle-btn" title="Collapse Library">◀</button>
+              </div>
+              <div class="library-actions" style="display: flex; flex-direction: column; gap: 8px;">
+                <label class="primary-action import-btn-label" style="display: block; text-align: center; cursor: pointer;">
+                  Import .apkg file
+                  <input type="file" id="ankiFileInput" accept=".apkg" class="hidden" />
+                </label>
+                <button type="button" class="secondary-action" id="createDeckBtn" style="padding: 10px 16px; font-size: 12px; font-weight: 600; text-align: center; width: 100%;">Create New Deck</button>
+              </div>
+              <div id="deckList" class="deck-list">
+                <!-- Loaded decks will render here -->
+              </div>
+            </aside>
+
+            <article class="panel study-panel">
+              <div class="study-panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
+                <div class="panel-kicker" id="studyKicker" style="margin-bottom: 0;">Active Study</div>
+                <button type="button" id="closeDeckBtn" class="close-deck-btn hidden" title="Close Deck">✕</button>
+              </div>
+              <div id="studyViewContainer" class="study-view-container">
+                <!-- Dynamic active study panel or empty state -->
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="fileReaderPage" class="page-view hidden">
+          <div class="notes-layout">
+            <aside class="panel notes-sidebar">
+              <div class="panel-kicker">PDF File Library</div>
+              
+              <div class="notes-upload-section">
+                <!-- Upload Personal Note PDF -->
+                <label class="primary-action import-btn-label" style="display: block; text-align: center; margin-bottom: 10px;">
+                  Import Personal PDF
+                  <input type="file" id="personalNotesInput" accept=".pdf" class="hidden" />
+                </label>
+                <!-- Upload Shared Reference PDF (Host Only) -->
+                <label id="hostUploadWrapper" class="secondary-action import-btn-label hidden" style="display: block; text-align: center; cursor: pointer;">
+                  Upload Shared Host PDF
+                  <input type="file" id="hostNotesInput" accept=".pdf" class="hidden" />
+                </label>
+              </div>
+
+              <div class="notes-section-title">Shared References</div>
+              <div id="sharedNotesList" class="notes-file-list">
+                <!-- Shared host files render here -->
+              </div>
+
+              <div class="notes-section-title">My Personal Notes</div>
+              <div id="personalNotesList" class="notes-file-list">
+                <!-- User personal files render here -->
+              </div>
+            </aside>
+
+            <article class="panel notes-viewer">
+              <div class="notes-viewer-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; width: 100%;">
+                <div class="panel-kicker" id="activeNoteTitle" style="margin-bottom: 0;">No Document Selected</div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <button type="button" id="notesFocusToggleBtn" class="pill hidden" style="font-size: 11px; padding: 4px 10px;" title="Toggle Reader Focus Mode">⛶ Focus Mode</button>
+                  <button type="button" id="closeNoteBtn" class="close-deck-btn hidden" title="Close Document">✕</button>
+                </div>
+              </div>
+              <div id="notesViewerContainer" class="notes-viewer-container">
+                <div class="notes-empty-state">
+                  <div class="empty-icon">🗀</div>
+                  <h3>Ready to read?</h3>
+                  <p>Select a shared reference or upload your own study guide PDF to start reading right here.</p>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <!-- New Dedicated Notes Tab -->
+        <section id="notesPage" class="page-view hidden">
+          <div class="notes-layout">
+            <aside class="panel notes-sidebar">
+              <div class="panel-kicker">Notes Directory</div>
+              <div class="notes-upload-section">
+                <button type="button" class="primary-action" id="createNewNoteBtn" style="width: 100%;">+ Create New Note</button>
+              </div>
+              <div class="notes-section-title">PDF Summaries</div>
+              <div id="notesLinkedDirectoryList" class="notes-file-list">
+                <!-- Linked notes list renders here -->
+              </div>
+              <div class="notes-section-title">Independent Notes</div>
+              <div id="notesUnlinkedDirectoryList" class="notes-file-list">
+                <!-- Unlinked notes list renders here -->
+              </div>
+            </aside>
+
+            <article class="panel notes-viewer">
+              <div class="notes-viewer-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; width: 100%;">
+                <div class="panel-kicker" id="activeEditorNoteTitle" style="margin-bottom: 0;">No Note Selected</div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <button type="button" id="toggleNotePreviewBtn" class="small-nav-btn hidden" style="background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; font-size: 11px; color: var(--text); cursor: pointer;">👁 Preview</button>
+                  <button type="button" id="downloadNoteBtn" class="small-nav-btn hidden" style="background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; font-size: 11px; color: var(--text); cursor: pointer;" title="Download as Markdown">↓ Download</button>
+                  <button type="button" id="deleteActiveNoteBtn" class="close-deck-btn hidden" title="Delete Note" style="color: var(--red); margin: 0; padding: 4px 8px;">✕</button>
+                </div>
+              </div>
+              
+              <div id="notesEditorContainer" class="notes-viewer-container" style="padding: 16px; display: flex; flex-direction: column; gap: 12px; background: var(--panel-2); overflow-y: auto;">
+                <div class="notes-empty-state" id="editorEmptyState">
+                  <div class="empty-icon">✎</div>
+                  <h3>Your Study Notebook</h3>
+                  <p>Create a new note or select an existing document summary to start editing your notes.</p>
+                </div>
+                
+                <div id="editorActiveWorkspace" class="hidden" style="display: flex; flex-direction: column; gap: 12px; height: 100%; width: 100%;">
+                  <input id="noteTitleInput" type="text" placeholder="Note Title..." style="width: 100%; background: transparent; border: none; border-bottom: 1px solid var(--line); color: var(--text); font-size: 18px; font-weight: 700; padding: 6px 0; outline: none;" />
+                  <textarea id="noteContentTextarea" placeholder="Write your notes here... Use this editor to summarize your studies." style="flex: 1; width: 100%; background: transparent; border: none; color: var(--soft); font-size: 13px; line-height: 1.6; resize: none; outline: none; font-family: inherit; padding: 6px 0;"></textarea>
+                  <div id="noteMarkdownPreview" class="hidden" style="flex: 1; width: 100%; color: var(--soft); font-size: 13px; line-height: 1.6; overflow-y: auto; padding: 6px 0; border: none; outline: none; font-family: inherit; text-align: left; background: transparent;"></div>
+                  <div style="font-size: 10px; color: var(--muted); text-align: right;" id="editorSaveStatus">All changes saved locally</div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <!-- New Dedicated Analytics Tab -->
+        <section id="analyticsPage" class="page-view hidden">
+          <div class="analytics-layout" style="display: flex; flex-direction: column; gap: 20px; padding: 20px; overflow-y: auto; height: 100%;">
+            
+            <!-- Cards Overview Row -->
+            <div class="analytics-overview-row" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; width: 100%;">
+              <article class="panel stat-card" style="padding: 16px; display: flex; flex-direction: column; gap: 6px;">
+                <div class="panel-kicker" style="margin-bottom: 0;">Total Study Time</div>
+                <div class="stat-value" id="analyticTotalHours" style="font-size: 26px; font-weight: 700; color: var(--purple);">0h 0m</div>
+                <div class="stat-subtext" style="font-size: 11px; color: var(--muted);">All-time logged focus</div>
+              </article>
+              <article class="panel stat-card" style="padding: 16px; display: flex; flex-direction: column; gap: 6px;">
+                <div class="panel-kicker" style="margin-bottom: 0;">Flashcard Reviews</div>
+                <div class="stat-value" id="analyticTotalCards" style="font-size: 26px; font-weight: 700; color: var(--mint);">0</div>
+                <div class="stat-subtext" style="font-size: 11px; color: var(--muted);">Cards tested in review</div>
+              </article>
+              <article class="panel stat-card" style="padding: 16px; display: flex; flex-direction: column; gap: 6px;">
+                <div class="panel-kicker" style="margin-bottom: 0;">Focus Sessions</div>
+                <div class="stat-value" id="analyticTotalSessions" style="font-size: 26px; font-weight: 700; color: var(--amber);">0</div>
+                <div class="stat-subtext" style="font-size: 11px; color: var(--muted);">Completed pomodoro blocks</div>
+              </article>
+              <article class="panel stat-card" style="padding: 16px; display: flex; flex-direction: column; gap: 6px;">
+                <div class="panel-kicker" style="margin-bottom: 0;">Consistency Rate</div>
+                <div class="stat-value" id="analyticConsistency" style="font-size: 26px; font-weight: 700; color: var(--purple);">0%</div>
+                <div class="stat-subtext" style="font-size: 11px; color: var(--muted);">Percentage of active days</div>
+              </article>
+            </div>
+
+            <!-- Charts Grid -->
+            <div class="analytics-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 20px; width: 100%;">
+              <!-- Study Trend (Line Chart) -->
+              <article class="panel chart-card" style="padding: 18px; display: flex; flex-direction: column; gap: 12px; min-height: 320px;">
+                <div class="panel-kicker" style="margin-bottom: 0;">Study Hours Trend (Last 7 Days)</div>
+                <div id="studyHoursChartContainer" style="flex: 1; position: relative; width: 100%; height: 100%; min-height: 200px;">
+                  <!-- Dynamic SVG Line Chart -->
+                </div>
+              </article>
+
+              <!-- Anki Rating Distribution (Donut Chart) -->
+              <article class="panel chart-card" style="padding: 18px; display: flex; flex-direction: column; gap: 12px; min-height: 320px;">
+                <div class="panel-kicker" style="margin-bottom: 0;">Anki Answer Quality Distribution</div>
+                <div id="ankiRatingsChartContainer" style="flex: 1; display: flex; justify-content: center; align-items: center; min-height: 200px;">
+                  <!-- Dynamic SVG Donut Chart -->
+                </div>
+              </article>
+
+              <!-- Weekly Sessions (Bar Chart) -->
+              <article class="panel chart-card" style="padding: 18px; display: flex; flex-direction: column; gap: 12px; min-height: 320px;">
+                <div class="panel-kicker" style="margin-bottom: 0;">Daily Focus Sessions Completed</div>
+                <div id="sessionsBarChartContainer" style="flex: 1; position: relative; width: 100%; height: 100%; min-height: 200px;">
+                  <!-- Dynamic SVG Bar Chart -->
+                </div>
+              </article>
+
+              <!-- Subject Study Distribution (Bar Chart) -->
+              <article class="panel chart-card" style="padding: 18px; display: flex; flex-direction: column; gap: 12px; min-height: 320px;">
+                <div class="panel-kicker" style="margin-bottom: 0;">Study Distribution by Subject Tag</div>
+                <div id="subjectAnalyticsChartContainer" style="flex: 1; position: relative; width: 100%; height: 100%; min-height: 200px; display: flex; justify-content: center; align-items: center;">
+                  <!-- Dynamic SVG Subject Distribution Bar Chart -->
+                </div>
+              </article>
+
+              <!-- Study Frequency Heatmap -->
+              <article class="panel chart-card" style="padding: 18px; display: flex; flex-direction: column; gap: 12px; min-height: 320px;">
+                <div class="panel-kicker" style="margin-bottom: 0;">Study Activity Matrix (Last 30 Days)</div>
+                <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 10px;">
+                  <div id="activityHeatmapContainer" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; max-width: 280px; margin: 0 auto;">
+                    <!-- Heatmap cells -->
+                  </div>
+                  <div style="display: flex; justify-content: center; align-items: center; gap: 6px; font-size: 10px; color: var(--muted); margin-top: 8px;">
+                    <span>Less active</span>
+                    <div style="width: 10px; height: 10px; background: var(--panel-2); border-radius: 2px;"></div>
+                    <div style="width: 10px; height: 10px; background: rgba(124, 103, 255, 0.2); border-radius: 2px;"></div>
+                    <div style="width: 10px; height: 10px; background: rgba(124, 103, 255, 0.5); border-radius: 2px;"></div>
+                    <div style="width: 10px; height: 10px; background: var(--purple); border-radius: 2px;"></div>
+                    <span>More active</span>
+                  </div>
+                </div>
+              </article>
+            </div>
+
+            <!-- Achievements Section -->
+            <article class="panel achievements-panel" style="padding: 18px; display: flex; flex-direction: column; gap: 14px; width: 100%;">
+              <div class="panel-kicker" style="margin-bottom: 0;">Study Badges & Achievements</div>
+              <div class="achievements-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;">
+                <div class="achievement-badge locked" id="badgeDeepWorker" style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; transition: all 0.3s ease;">
+                  <div class="badge-icon" style="font-size: 24px;">🧠</div>
+                  <div>
+                    <div class="badge-title" style="font-size: 12px; font-weight: 700; color: var(--text);">Deep Worker</div>
+                    <div class="badge-desc" style="font-size: 10px; color: var(--muted);">Study for 1+ hours straight</div>
+                  </div>
+                </div>
+                <div class="achievement-badge locked" id="badgeCardMaster" style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; transition: all 0.3s ease;">
+                  <div class="badge-icon" style="font-size: 24px;">🎴</div>
+                  <div>
+                    <div class="badge-title" style="font-size: 12px; font-weight: 700; color: var(--text);">Card Centurion</div>
+                    <div class="badge-desc" style="font-size: 10px; color: var(--muted);">Review 100+ cards total</div>
+                  </div>
+                </div>
+                <div class="achievement-badge locked" id="badgeConsistent" style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; transition: all 0.3s ease;">
+                  <div class="badge-icon" style="font-size: 24px;">📅</div>
+                  <div>
+                    <div class="badge-title" style="font-size: 12px; font-weight: 700; color: var(--text);">High Consistency</div>
+                    <div class="badge-desc" style="font-size: 10px; color: var(--muted);">Study on 5+ unique days</div>
+                  </div>
+                </div>
+                <div class="achievement-badge locked" id="badgeStreakMaster" style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; transition: all 0.3s ease;">
+                  <div class="badge-icon" style="font-size: 24px;">🔥</div>
+                  <div>
+                    <div class="badge-title" style="font-size: 12px; font-weight: 700; color: var(--text);">Streak Master</div>
+                    <div class="badge-desc" style="font-size: 10px; color: var(--muted);">Reach a 3+ day streak</div>
+                  </div>
+                </div>
+              </div>
+            </article>
+            
+          </div>
+        </section>
+
+        <!-- New Dedicated Library Tab -->
+        <section id="libraryPage" class="page-view hidden">
+          <div class="library-layout" style="display: flex; flex-direction: column; gap: 20px; padding: 20px; overflow-y: auto; height: 100%;">
+            
+            <!-- Library Header Search & Filter -->
+            <div class="library-header-panel" style="display: flex; flex-direction: column; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; width: 100%;">
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;">
+                <div>
+                  <h3 style="font-size: 16px; font-weight: 700; margin: 0; color: var(--text);">Unified Library Hub</h3>
+                  <p style="font-size: 11px; color: var(--muted); margin: 4px 0 0 0;">Search and manage your documents, study notes, and flashcard decks.</p>
+                </div>
+                <div style="position: relative; width: 100%; max-width: 320px;">
+                  <input type="text" id="librarySearchInput" placeholder="Search files, notes, decks..." style="width: 100%; padding: 10px 14px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--text); outline: none; transition: border-color 0.2s;" />
+                </div>
+              </div>
+
+              <!-- Filters tabs & Stats Summary -->
+              <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--line); padding-top: 12px; flex-wrap: wrap; gap: 12px;">
+                <div class="library-filter-tabs" style="display: flex; gap: 8px;">
+                  <button type="button" class="lib-tab active" data-filter="all" style="padding: 6px 12px; font-size: 11px; font-weight: 700; background: var(--purple); color: #fff; border: none; border-radius: 6px; cursor: pointer;">All Assets</button>
+                  <button type="button" class="lib-tab" data-filter="file" style="padding: 6px 12px; font-size: 11px; font-weight: 700; background: var(--panel-2); color: var(--soft); border: 1px solid var(--line); border-radius: 6px; cursor: pointer;">PDF Files</button>
+                  <button type="button" class="lib-tab" data-filter="note" style="padding: 6px 12px; font-size: 11px; font-weight: 700; background: var(--panel-2); color: var(--soft); border: 1px solid var(--line); border-radius: 6px; cursor: pointer;">Study Notes</button>
+                  <button type="button" class="lib-tab" data-filter="deck" style="padding: 6px 12px; font-size: 11px; font-weight: 700; background: var(--panel-2); color: var(--soft); border: 1px solid var(--line); border-radius: 6px; cursor: pointer;">Anki Decks</button>
+                </div>
+                
+                <div style="display: flex; gap: 16px; font-size: 11px; color: var(--muted);">
+                  <div>PDFs: <strong id="libStatFiles" style="color: var(--mint);">0</strong></div>
+                  <div>Notes: <strong id="libStatNotes" style="color: var(--purple);">0</strong></div>
+                  <div>Decks: <strong id="libStatDecks" style="color: var(--amber);">0</strong></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Library Items Grid -->
+            <div id="libraryItemsGrid" class="library-items-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; width: 100%;">
+              <!-- Dynamic Cards generated by Javascript -->
+            </div>
+            
+          </div>
+        </section>
+
+        <!-- New Dedicated Calendar Tab -->
+        <section id="calendarPage" class="page-view hidden">
+          <div class="calendar-layout" style="display: grid; grid-template-columns: 240px 1fr; gap: 20px; padding: 20px; height: 100%; overflow: hidden;">
+            
+            <!-- Calendar Sidebar -->
+            <aside class="panel calendar-sidebar" style="display: flex; flex-direction: column; gap: 20px; overflow-y: auto; padding: 16px;">
+              <button type="button" class="primary-action" id="createEventBtn" style="width: 100%; padding: 10px; font-weight: 700; font-size: 12px;">+ Create Event</button>
+              
+              <!-- Mini Calendar Widget -->
+              <div class="mini-calendar-widget">
+                <div class="mini-cal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <span id="miniCalTitle" style="font-size: 11px; font-weight: 700; color: var(--text);">August 2026</span>
+                  <div style="display: flex; gap: 4px;">
+                    <button type="button" id="prevMiniMonthBtn" class="small-nav-btn" style="background: transparent; border: none; color: var(--soft); cursor: pointer; padding: 2px 4px; font-size: 10px;">◀</button>
+                    <button type="button" id="nextMiniMonthBtn" class="small-nav-btn" style="background: transparent; border: none; color: var(--soft); cursor: pointer; padding: 2px 4px; font-size: 10px;">▶</button>
+                  </div>
+                </div>
+                <div class="mini-cal-days" style="display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-size: 9px; font-weight: 700; color: var(--muted); margin-bottom: 4px;">
+                  <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
+                </div>
+                <div id="miniCalendarGrid" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center;">
+                  <!-- Dynamic Mini Month cells -->
+                </div>
+              </div>
+
+              <!-- Calendars Categories checkboxes -->
+              <div class="calendar-categories-panel" style="border-top: 1px solid var(--line); padding-top: 16px;">
+                <div class="panel-kicker" style="margin-bottom: 10px;">Filter by Color</div>
+                <div style="display: flex; flex-direction: column; gap: 10px; font-size: 12px; color: var(--soft);">
+                  <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; width: 100%;">
+                    <input type="checkbox" class="cal-color-filter" value="#ff6e79" checked style="accent-color: #ff6e79; margin: 0;" />
+                    <span style="width: 8px; height: 8px; background: #ff6e79; border-radius: 50%; flex-shrink: 0;"></span>
+                    <span class="color-label-text" data-color="#ff6e79" style="flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Study Tasks</span>
+                    <button type="button" class="edit-color-label-btn" data-color="#ff6e79" style="background: none; border: none; color: var(--muted); font-size: 11px; cursor: pointer; padding: 2px 4px; border-radius: 4px;" title="Rename color">✎</button>
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; width: 100%;">
+                    <input type="checkbox" class="cal-color-filter" value="#7c67ff" checked style="accent-color: #7c67ff; margin: 0;" />
+                    <span style="width: 8px; height: 8px; background: #7c67ff; border-radius: 50%; flex-shrink: 0;"></span>
+                    <span class="color-label-text" data-color="#7c67ff" style="flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Schedules</span>
+                    <button type="button" class="edit-color-label-btn" data-color="#7c67ff" style="background: none; border: none; color: var(--muted); font-size: 11px; cursor: pointer; padding: 2px 4px; border-radius: 4px;" title="Rename color">✎</button>
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; width: 100%;">
+                    <input type="checkbox" class="cal-color-filter" value="#58ddd2" checked style="accent-color: #58ddd2; margin: 0;" />
+                    <span style="width: 8px; height: 8px; background: #58ddd2; border-radius: 50%; flex-shrink: 0;"></span>
+                    <span class="color-label-text" data-color="#58ddd2" style="flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Focus Sessions</span>
+                    <button type="button" class="edit-color-label-btn" data-color="#58ddd2" style="background: none; border: none; color: var(--muted); font-size: 11px; cursor: pointer; padding: 2px 4px; border-radius: 4px;" title="Rename color">✎</button>
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; width: 100%;">
+                    <input type="checkbox" class="cal-color-filter" value="#ffb329" checked style="accent-color: #ffb329; margin: 0;" />
+                    <span style="width: 8px; height: 8px; background: #ffb329; border-radius: 50%; flex-shrink: 0;"></span>
+                    <span class="color-label-text" data-color="#ffb329" style="flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Other</span>
+                    <button type="button" class="edit-color-label-btn" data-color="#ffb329" style="background: none; border: none; color: var(--muted); font-size: 11px; cursor: pointer; padding: 2px 4px; border-radius: 4px;" title="Rename color">✎</button>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Export button -->
+              <div style="border-top: 1px solid var(--line); padding-top: 16px; margin-top: 16px;">
+                <button type="button" id="exportCalICSBtn" class="primary-action" style="width: 100%; padding: 8px 12px; font-size: 11px; font-weight: bold; border-radius: 6px; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; border: none; background: var(--purple); color: #fff;">
+                  ↓ Export Calendar (.ics)
+                </button>
+              </div>
+            </aside>
+
+            <!-- Main Calendar Workspace -->
+            <article class="panel calendar-workspace" style="display: flex; flex-direction: column; height: 100%; overflow: hidden; padding: 18px;">
+              
+              <!-- Calendar Navigation Header -->
+              <div class="calendar-workspace-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; border-bottom: 1px solid var(--line); padding-bottom: 12px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <h3 id="calendarActiveMonthTitle" style="font-size: 16px; font-weight: 700; margin: 0; min-width: 140px; color: var(--text);">August 2026</h3>
+                  <button type="button" class="secondary" id="calendarTodayBtn" style="padding: 6px 12px; font-size: 11px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; color: var(--text);">Today</button>
+                  <div style="display: flex; gap: 4px;">
+                    <button type="button" id="prevCalMonthBtn" class="small-nav-btn" style="background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 11px; color: var(--soft); cursor: pointer;">◀</button>
+                    <button type="button" id="nextCalMonthBtn" class="small-nav-btn" style="background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 11px; color: var(--soft); cursor: pointer;">▶</button>
+                  </div>
+                </div>
+                
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <select id="calendarViewSelect" style="padding: 6px 12px; font-size: 11px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); outline: none; cursor: pointer;">
+                    <option value="month">Month View</option>
+                    <option value="week">Week View</option>
+                    <option value="day">Day View</option>
+                    <option value="agenda">Agenda View</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Grid Content panel -->
+              <div id="calendarWorkspaceGrid" style="flex: 1; overflow-y: auto; position: relative;">
+                <!-- Renders Month grid, Week slots, Day view, or Agenda dynamically -->
+              </div>
+            </article>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <!-- Calendar Event Creator/Editor Modal -->
+    <div id="calendarEventModal" class="modal-backdrop hidden" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: flex; justify-content: center; align-items: center; z-index: 2000; backdrop-filter: blur(4px);">
+      <div class="panel modal-content" style="width: 100%; max-width: 400px; padding: 20px; display: flex; flex-direction: column; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.3);">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h3 id="modalEventTitleLabel" style="font-size: 14px; font-weight: 700; margin: 0; color: var(--text);">Create Calendar Event</h3>
+          <button type="button" id="closeEventModalBtn" style="background: transparent; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px;">✕</button>
+        </div>
+        
+        <form id="calendarEventForm" style="display: flex; flex-direction: column; gap: 12px;">
+          <input type="hidden" id="modalEventId" />
+          
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700;">Event Type</label>
+            <select id="modalEventType" style="padding: 8px 12px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); outline: none; width: 100%;">
+              <option value="custom">Calendar Event (Custom)</option>
+              <option value="task">Study Task (Home Page Sync)</option>
+            </select>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700;">Event Title</label>
+            <input type="text" id="modalEventTitle" placeholder="Add title..." required style="padding: 8px 12px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); outline: none; width: 100%;" />
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <label style="font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700;">Date</label>
+              <input type="date" id="modalEventDate" required style="padding: 8px 12px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); outline: none; width: 100%;" />
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <label style="font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700;">Color Tag</label>
+              <select id="modalEventColor" style="padding: 8px 12px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); outline: none; width: 100%;">
+                <option value="#7c67ff">Purple (Default)</option>
+                <option value="#ffb329">Amber</option>
+                <option value="#58ddd2">Mint</option>
+                <option value="#ff6e79">Red</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <label style="font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700;">Start Time</label>
+              <input type="time" id="modalEventStartTime" required style="padding: 8px 12px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); outline: none; width: 100%;" />
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <label style="font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700;">End Time</label>
+              <input type="time" id="modalEventEndTime" required style="padding: 8px 12px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); outline: none; width: 100%;" />
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700;">Description</label>
+            <textarea id="modalEventDesc" placeholder="Add description..." style="padding: 8px 12px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); outline: none; resize: none; height: 60px; font-family: inherit; width: 100%;"></textarea>
+          </div>
+
+          <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px;">
+            <button type="button" id="deleteEventBtn" class="close-deck-btn hidden" style="color: var(--red); padding: 8px 12px; font-size: 11px; margin-right: auto;">Delete</button>
+            <button type="button" id="cancelEventModalBtn" style="padding: 8px 14px; font-size: 11px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); cursor: pointer;">Cancel</button>
+            <button type="submit" class="primary-action" style="padding: 8px 14px; font-size: 11px; border: none; border-radius: 6px; cursor: pointer;">Save Event</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Rename Color Label Modal -->
+    <div id="renameColorModal" class="modal-backdrop hidden" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: flex; justify-content: center; align-items: center; z-index: 2100; backdrop-filter: blur(4px);">
+      <div class="panel modal-content" style="width: 100%; max-width: 320px; padding: 20px; display: flex; flex-direction: column; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.3);">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h3 style="font-size: 13px; font-weight: 700; margin: 0; color: var(--text);">Rename Category</h3>
+          <button type="button" id="closeRenameModalBtn" style="background: transparent; border: none; color: var(--muted); font-size: 16px; cursor: pointer; padding: 4px;">✕</button>
+        </div>
+        
+        <form id="renameColorForm" style="display: flex; flex-direction: column; gap: 12px;">
+          <input type="hidden" id="renameColorHex" />
+          
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700;">Category Name</label>
+            <input type="text" id="renameColorInput" placeholder="Enter custom label..." required style="padding: 8px 12px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); outline: none; width: 100%;" />
+          </div>
+
+          <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px;">
+            <button type="button" id="cancelRenameModalBtn" style="padding: 8px 14px; font-size: 11px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); cursor: pointer;">Cancel</button>
+            <button type="submit" class="primary-action" style="padding: 8px 14px; font-size: 11px; border: none; border-radius: 6px; cursor: pointer;">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
