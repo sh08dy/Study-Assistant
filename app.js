@@ -129,6 +129,24 @@ const defaultData = () => ({
   calendarEvents: []
 });
 
+// Supabase Cloud Configuration
+const rawSupabaseUrl = "https://laqusehbufgidoqbfjyq.supabase.co/rest/v1/";
+const SUPABASE_URL = rawSupabaseUrl.replace(/\/rest\/v1\/?$/, "");
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxhcXVzZWhidWZnaWRvcWJmanlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1NDg5MTEsImV4cCI6MjEwNDEyNDkxMX0.sKmq5h_8NV_I9CjnjPBRJjJVjyRYRNnjCT5plMhLBig";
+
+let supabaseClient = null;
+try {
+  if (window.supabase && typeof window.supabase.createClient === "function") {
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+} catch (e) {
+  console.error("Failed to initialize Supabase client:", e);
+}
+
+let currentSupabaseUser = null;
+let supabaseRealtimeChannel = null;
+let modalAuthMode = "login";
+
 let db = loadDb();
 let currentUser = localStorage.getItem(`${storeKey}:session`);
 let data = currentUser && db.users[currentUser] ? db.users[currentUser].data : null;
@@ -172,6 +190,307 @@ function saveFlashcardDecks() {
   });
 }
 
+// ----------------------------------------------------
+// Supabase Cloud Todos Sync Functions
+// Table Schema: id (int8), title (text), is_completed (bool), user_id (uuid)
+// ----------------------------------------------------
+
+async function fetchUserTodos() {
+  if (!supabaseClient || !currentSupabaseUser) {
+    if (data) data.tasks = [];
+    renderTasks();
+    if (typeof renderCalendarTab === "function") renderCalendarTab();
+    return;
+  }
+
+  try {
+    const { data: todos, error } = await supabaseClient
+      .from("todos")
+      .select("id, title, is_completed, user_id")
+      .eq("user_id", currentSupabaseUser.id)
+      .order("id", { ascending: false });
+
+    if (error) {
+      console.error("Failed to fetch todos from Supabase:", error);
+      return;
+    }
+
+    const todayStr = getLocalDateString();
+    if (data) {
+      data.tasks = (todos || []).map((row) => {
+        const isCompleted = Boolean(row.is_completed);
+        const titleText = row.title || "Untitled Task";
+
+        return {
+          id: String(row.id),
+          supabaseId: row.id,
+          title: titleText,
+          done: isCompleted,
+          is_completed: isCompleted,
+          tag: "Review",
+          date: todayStr,
+          color: "#ff6e79"
+        };
+      });
+
+      saveUser();
+      renderTasks();
+      if (typeof renderCalendarTab === "function") renderCalendarTab();
+    }
+  } catch (err) {
+    console.error("fetchUserTodos exception:", err);
+  }
+}
+
+async function addSupabaseTodo(task) {
+  if (!supabaseClient || !currentSupabaseUser) return;
+  try {
+    const payload = {
+      title: task.title,
+      is_completed: false,
+      user_id: currentSupabaseUser.id
+    };
+
+    const { data: inserted, error } = await supabaseClient
+      .from("todos")
+      .insert([payload])
+      .select();
+
+    if (error) {
+      console.error("Failed to insert task into Supabase:", error);
+      return;
+    }
+
+    if (inserted && inserted.length > 0) {
+      task.id = String(inserted[0].id);
+      task.supabaseId = inserted[0].id;
+      task.is_completed = Boolean(inserted[0].is_completed);
+      task.done = task.is_completed;
+      saveUser();
+    }
+  } catch (err) {
+    console.error("addSupabaseTodo exception:", err);
+  }
+}
+
+async function updateSupabaseTodo(task) {
+  if (!supabaseClient || !currentSupabaseUser) return;
+  const targetId = task.supabaseId || task.id;
+  if (!targetId) return;
+
+  try {
+    const completedState = Boolean(task.is_completed !== undefined ? task.is_completed : task.done);
+    const { error } = await supabaseClient
+      .from("todos")
+      .update({
+        is_completed: completedState
+      })
+      .eq("id", targetId)
+      .eq("user_id", currentSupabaseUser.id);
+
+    if (error) {
+      console.error("Failed to update task in Supabase:", error);
+    }
+  } catch (err) {
+    console.error("updateSupabaseTodo exception:", err);
+  }
+}
+
+async function deleteSupabaseTodo(task) {
+  if (!supabaseClient || !currentSupabaseUser) return;
+  const targetId = task.supabaseId || task.id;
+  if (!targetId) return;
+
+  try {
+    const { error } = await supabaseClient
+      .from("todos")
+      .delete()
+      .eq("id", targetId)
+      .eq("user_id", currentSupabaseUser.id);
+
+    if (error) {
+      console.error("Failed to delete task from Supabase:", error);
+    }
+  } catch (err) {
+    console.error("deleteSupabaseTodo exception:", err);
+  }
+}
+
+function setupSupabaseRealtime(userId) {
+  if (!supabaseClient || !userId) return;
+  if (supabaseRealtimeChannel) {
+    try {
+      supabaseClient.removeChannel(supabaseRealtimeChannel);
+    } catch (e) {}
+    supabaseRealtimeChannel = null;
+  }
+
+  try {
+    supabaseRealtimeChannel = supabaseClient
+      .channel("public:todos")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "todos",
+          filter: `user_id=eq.${userId}`
+        },
+        () => {
+          fetchUserTodos();
+        }
+      )
+      .subscribe();
+  } catch (err) {
+    console.warn("Could not subscribe to Supabase Realtime:", err);
+  }
+}
+
+// ----------------------------------------------------
+// Modal & Page Auth Handlers
+// ----------------------------------------------------
+
+function setModalAuthMode(mode) {
+  modalAuthMode = mode;
+  const loginTab = el("modalLoginTab");
+  const signupTab = el("modalSignupTab");
+  const nameField = el("modalNameField");
+  const submitBtn = el("modalAuthSubmit");
+  const msg = el("modalAuthMessage");
+
+  if (loginTab) loginTab.classList.toggle("active", mode === "login");
+  if (signupTab) signupTab.classList.toggle("active", mode === "signup");
+  if (nameField) nameField.classList.toggle("hidden", mode === "login");
+  if (submitBtn) submitBtn.textContent = mode === "login" ? "Log In" : "Create Account";
+  if (msg) {
+    msg.textContent = "";
+    msg.className = "form-message";
+  }
+}
+
+function setModalAuthMessage(message, type = "") {
+  const node = el("modalAuthMessage");
+  if (node) {
+    node.textContent = message;
+    node.className = `form-message ${type}`;
+  }
+}
+
+function openAuthModal(initialMessage = "") {
+  const modal = el("authModal");
+  if (!modal) return;
+
+  const loggedInView = el("authModalLoggedIn");
+  const loggedOutView = el("authModalLoggedOut");
+  const modalTitle = el("authModalTitle");
+
+  if (currentSupabaseUser) {
+    if (modalTitle) modalTitle.textContent = "My Account & Cloud Sync";
+    if (loggedInView) loggedInView.classList.remove("hidden");
+    if (loggedOutView) loggedOutView.classList.add("hidden");
+
+    const emailEl = el("modalLoggedInEmail");
+    if (emailEl) emailEl.textContent = currentSupabaseUser.email || currentUser || "Logged In User";
+
+    const avatarEl = el("modalUserAvatar");
+    if (avatarEl) {
+      const email = currentSupabaseUser.email || currentUser || "SA";
+      avatarEl.textContent = email.substring(0, 2).toUpperCase();
+    }
+  } else {
+    if (modalTitle) modalTitle.textContent = "Log In or Sign Up";
+    if (loggedInView) loggedInView.classList.add("hidden");
+    if (loggedOutView) loggedOutView.classList.remove("hidden");
+    setModalAuthMode("login");
+    if (initialMessage) {
+      setModalAuthMessage(initialMessage, "info");
+    }
+  }
+
+  modal.classList.remove("hidden");
+}
+
+function closeAuthModal() {
+  const modal = el("authModal");
+  if (modal) modal.classList.add("hidden");
+}
+
+async function handleModalAuth(e) {
+  e.preventDefault();
+  if (!supabaseClient) {
+    setModalAuthMessage("Supabase client is not loaded. Check connection.", "error");
+    return;
+  }
+
+  const email = el("modalEmailInput").value.trim().toLowerCase();
+  const password = el("modalPasswordInput").value;
+  const name = el("modalNameInput") ? el("modalNameInput").value.trim() : "";
+  const submitBtn = el("modalAuthSubmit");
+
+  if (!email || !password) {
+    setModalAuthMessage("Please provide both email and password.", "error");
+    return;
+  }
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = modalAuthMode === "login" ? "Logging in..." : "Creating account...";
+
+  try {
+    if (modalAuthMode === "signup") {
+      const { data: authData, error } = await supabaseClient.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { name: name || email.split("@")[0] }
+        }
+      });
+
+      if (error) {
+        setModalAuthMessage(error.message, "error");
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Create Account";
+        return;
+      }
+
+      if (authData.user && !authData.session) {
+        setModalAuthMessage("Account created! Please check your email to confirm your account, then log in.", "ok");
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Create Account";
+        return;
+      }
+
+      setModalAuthMessage("Account created! Logging you in...", "ok");
+      await login(email, authData.user);
+      setTimeout(() => {
+        closeAuthModal();
+      }, 600);
+    } else {
+      const { data: authData, error } = await supabaseClient.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (error) {
+        setModalAuthMessage(error.message, "error");
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Log In";
+        return;
+      }
+
+      setModalAuthMessage("Logged in successfully!", "ok");
+      await login(email, authData.user);
+      setTimeout(() => {
+        closeAuthModal();
+      }, 600);
+    }
+  } catch (err) {
+    setModalAuthMessage(err.message || "An unexpected error occurred.", "error");
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = modalAuthMode === "login" ? "Log In" : "Create Account";
+  }
+}
+
 function setAuthMode(mode) {
   authMode = mode;
   el("loginTab").classList.toggle("active", mode === "login");
@@ -185,16 +504,66 @@ function setAuthMode(mode) {
 
 function setMessage(message, type = "") {
   const node = el("authMessage");
+  if (!node) return;
   node.textContent = message;
   node.className = `form-message ${type}`;
 }
 
-function handleAuth(event) {
+async function handleAuth(event) {
   event.preventDefault();
   const name = el("nameInput").value.trim();
   const email = el("emailInput").value.trim().toLowerCase();
   const password = el("passwordInput").value;
+  const submitBtn = el("authSubmit");
 
+  if (supabaseClient) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = authMode === "login" ? "Logging in..." : "Creating account...";
+    try {
+      if (authMode === "signup") {
+        const { data: authData, error } = await supabaseClient.auth.signUp({
+          email,
+          password,
+          options: { data: { name: name || email.split("@")[0] } }
+        });
+        if (error) {
+          setMessage(error.message, "error");
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Create account";
+          return;
+        }
+        if (authData.user && !authData.session) {
+          setMessage("Account created! Please check your email to confirm your account, then log in.", "ok");
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Create account";
+          return;
+        }
+        setMessage("Account created. You are logged in.", "ok");
+        await login(email, authData.user);
+        return;
+      } else {
+        const { data: authData, error } = await supabaseClient.auth.signInWithPassword({
+          email,
+          password
+        });
+        if (error) {
+          setMessage(error.message, "error");
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Login";
+          return;
+        }
+        await login(email, authData.user);
+        return;
+      }
+    } catch (err) {
+      console.warn("Supabase auth error, falling back to local:", err);
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = authMode === "login" ? "Login" : "Create account";
+    }
+  }
+
+  // Fallback local storage auth
   if (authMode === "signup") {
     if (db.users[email]) {
       setMessage("An account with this email already exists.", "error");
@@ -214,9 +583,19 @@ function handleAuth(event) {
   login(email);
 }
 
-async function login(email) {
+async function login(email, supabaseUser = null) {
   currentUser = email;
+  currentSupabaseUser = supabaseUser;
   localStorage.setItem(`${storeKey}:session`, email);
+
+  if (!db.users[email]) {
+    db.users[email] = {
+      name: supabaseUser?.user_metadata?.name || email.split("@")[0],
+      data: defaultData()
+    };
+    saveDb();
+  }
+
   data = normalizeData(db.users[email].data || defaultData());
   
   try {
@@ -230,13 +609,58 @@ async function login(email) {
   saveDb();
   authView.classList.add("hidden");
   appView.classList.remove("hidden");
+
+  // Update avatar & tooltips
+  const initials = (email || "SA").substring(0, 2).toUpperCase();
+  const userBtn = el("userButton");
+  if (userBtn) {
+    userBtn.textContent = initials;
+    userBtn.title = `Logged in as ${email} (Click to manage account)`;
+  }
+  const logoutBtn = el("logoutButton");
+  if (logoutBtn) {
+    logoutBtn.title = `Log Out (${email})`;
+  }
+
   renderAll();
   startTimerLoop();
+
+  // Supabase cloud tasks fetch & realtime sync
+  if (supabaseClient) {
+    if (!currentSupabaseUser) {
+      try {
+        const { data: userData } = await supabaseClient.auth.getUser();
+        if (userData?.user) {
+          currentSupabaseUser = userData.user;
+        }
+      } catch (e) {}
+    }
+    if (currentSupabaseUser) {
+      fetchUserTodos();
+      setupSupabaseRealtime(currentSupabaseUser.id);
+    }
+  }
 }
 
-function logout() {
+async function logout() {
   stopTimerLoop();
+  if (supabaseClient) {
+    try {
+      if (supabaseRealtimeChannel) {
+        supabaseClient.removeChannel(supabaseRealtimeChannel);
+        supabaseRealtimeChannel = null;
+      }
+      await supabaseClient.auth.signOut();
+    } catch (err) {
+      console.warn("Supabase sign out error:", err);
+    }
+  }
+
+  currentSupabaseUser = null;
   currentUser = null;
+  if (data) {
+    data.tasks = []; // Clear tasks when logged out
+  }
   data = null;
   currentStudyDeck = null;
   currentStudyCards = [];
@@ -250,8 +674,16 @@ function logout() {
     activePdfUrl = null;
   }
   localStorage.removeItem(`${storeKey}:session`);
+
+  const userBtn = el("userButton");
+  if (userBtn) {
+    userBtn.textContent = "SA";
+    userBtn.title = "Account (Not logged in)";
+  }
+
   appView.classList.add("hidden");
   authView.classList.remove("hidden");
+  setMessage("");
 }
 
 function renderAll() {
@@ -545,26 +977,54 @@ function renderStreak() {
 
 function renderTasks() {
   const list = el("taskList");
+  if (!list) return;
   list.innerHTML = "";
+
+  if (!currentSupabaseUser && (!currentUser || !data)) {
+    list.innerHTML = `
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 20px 12px; text-align: center; color: var(--muted); font-size: 11px;">
+        <span>Please log in to view and sync your study tasks with the cloud.</span>
+        <button type="button" id="promptLoginTasksBtn" class="primary-action" style="padding: 6px 14px; font-size: 11px; margin-top: 4px; border-radius: 6px; cursor: pointer;">Log In / Sign Up</button>
+      </div>
+    `;
+    const promptBtn = el("promptLoginTasksBtn");
+    if (promptBtn) {
+      promptBtn.addEventListener("click", () => openAuthModal());
+    }
+    return;
+  }
+
   if (!data) return;
   const todayStr = getLocalDateString();
   const tasks = data.tasks || [];
+  let renderedCount = 0;
+
   tasks.forEach((task, index) => {
     const taskDate = task.date || todayStr;
     if (taskDate !== todayStr) return;
+    renderedCount++;
+
+    const isCompleted = task.is_completed !== undefined ? Boolean(task.is_completed) : Boolean(task.done);
 
     const row = document.createElement("div");
-    row.className = `task ${task.done ? "completed" : ""}`;
+    row.className = `task ${isCompleted ? "completed" : ""}`;
     row.style.borderLeft = `3px solid ${task.color || "#ff6e79"}`;
     row.style.paddingLeft = "8px";
     row.innerHTML = `
-      <input type="checkbox" ${task.done ? "checked" : ""} data-task="${index}" />
+      <input type="checkbox" ${isCompleted ? "checked" : ""} data-task="${index}" />
       <span class="task-title">${escapeHtml(task.title)}</span>
-      <span class="tag ${escapeHtml(task.tag)}">${escapeHtml(task.tag)}</span>
+      <span class="tag ${escapeHtml(task.tag || "Review")}">${escapeHtml(task.tag || "Review")}</span>
       <button class="delete-task" type="button" data-delete-task="${index}" title="Delete task">×</button>
     `;
     list.append(row);
   });
+
+  if (renderedCount === 0) {
+    const emptyRow = document.createElement("div");
+    emptyRow.style.cssText = "text-align: center; color: var(--muted); font-size: 11px; padding: 12px 0;";
+    emptyRow.textContent = "No tasks for today. Add one below!";
+    list.append(emptyRow);
+  }
 
   const taskColorSelect = el("taskColorInput");
   if (taskColorSelect && data.colorLabels) {
@@ -3324,15 +3784,20 @@ async function saveCalendarEvent() {
   data.tasks = data.tasks.filter(t => t.id !== targetId);
 
   if (type === "task") {
-    data.tasks.push({
+    const newTask = {
       id: targetId,
       title: title,
       tag: "Review",
       done: false,
+      is_completed: false,
       date,
       color,
       desc
-    });
+    };
+    data.tasks.push(newTask);
+    if (currentSupabaseUser) {
+      addSupabaseTodo(newTask);
+    }
   } else {
     data.calendarEvents.push({
       id: targetId,
@@ -3355,6 +3820,9 @@ async function deleteCalendarEvent(id) {
   if (confirm("Are you sure you want to delete this event?")) {
     data.calendarEvents = (data.calendarEvents || []).filter(e => e.id !== id);
     data.tasks = (data.tasks || []).filter(t => t.id !== id);
+    if (currentSupabaseUser) {
+      deleteSupabaseTodo({ id });
+    }
     saveUser();
     el("calendarEventModal").classList.add("hidden");
     renderCalendarTab();
@@ -4088,7 +4556,72 @@ function bindEvents() {
   el("loginTab").addEventListener("click", () => setAuthMode("login"));
   el("signupTab").addEventListener("click", () => setAuthMode("signup"));
   el("authForm").addEventListener("submit", handleAuth);
-  el("logoutButton").addEventListener("click", logout);
+  
+  const logoutBtn = el("logoutButton");
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", () => {
+      if (currentSupabaseUser || currentUser) {
+        openAuthModal();
+      } else {
+        openAuthModal("Please log in to sync your study tasks.");
+      }
+    });
+  }
+
+  const userBtn = el("userButton");
+  if (userBtn) {
+    userBtn.addEventListener("click", () => openAuthModal());
+  }
+
+  // Auth Modal controls
+  const closeAuthModalBtn = el("closeAuthModalBtn");
+  if (closeAuthModalBtn) {
+    closeAuthModalBtn.addEventListener("click", closeAuthModal);
+  }
+
+  const authModal = el("authModal");
+  if (authModal) {
+    authModal.addEventListener("click", (e) => {
+      if (e.target === authModal) closeAuthModal();
+    });
+  }
+
+  const modalLoginTab = el("modalLoginTab");
+  if (modalLoginTab) {
+    modalLoginTab.addEventListener("click", () => setModalAuthMode("login"));
+  }
+
+  const modalSignupTab = el("modalSignupTab");
+  if (modalSignupTab) {
+    modalSignupTab.addEventListener("click", () => setModalAuthMode("signup"));
+  }
+
+  const modalAuthForm = el("modalAuthForm");
+  if (modalAuthForm) {
+    modalAuthForm.addEventListener("submit", handleModalAuth);
+  }
+
+  const modalLogoutBtn = el("modalLogoutBtn");
+  if (modalLogoutBtn) {
+    modalLogoutBtn.addEventListener("click", () => {
+      logout();
+      closeAuthModal();
+    });
+  }
+
+  const modalSyncNowBtn = el("modalSyncNowBtn");
+  if (modalSyncNowBtn) {
+    modalSyncNowBtn.addEventListener("click", async () => {
+      modalSyncNowBtn.textContent = "Syncing...";
+      await fetchUserTodos();
+      setTimeout(() => {
+        modalSyncNowBtn.textContent = "Synced ✓";
+        setTimeout(() => {
+          modalSyncNowBtn.textContent = "🔄 Sync Now";
+        }, 1200);
+      }, 400);
+    });
+  }
 
   document.querySelectorAll(".nav-item[data-page]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -4437,29 +4970,62 @@ function bindEvents() {
     }
   });
 
-  el("taskList").addEventListener("change", (event) => {
+  el("taskList").addEventListener("change", async (event) => {
     if (!event.target.matches("[data-task]")) return;
-    data.tasks[Number(event.target.dataset.task)].done = event.target.checked;
+    const taskIndex = Number(event.target.dataset.task);
+    const task = data.tasks[taskIndex];
+    if (!task) return;
+    task.is_completed = event.target.checked;
+    task.done = event.target.checked;
     saveUser();
     renderTasks();
+    if (currentSupabaseUser) {
+      await updateSupabaseTodo(task);
+    }
   });
 
-  el("taskList").addEventListener("click", (event) => {
+  el("taskList").addEventListener("click", async (event) => {
     if (!event.target.matches("[data-delete-task]")) return;
-    data.tasks.splice(Number(event.target.dataset.deleteTask), 1);
+    const taskIndex = Number(event.target.dataset.deleteTask);
+    const task = data.tasks[taskIndex];
+    if (!task) return;
+    data.tasks.splice(taskIndex, 1);
     saveUser();
     renderTasks();
+    if (currentSupabaseUser) {
+      await deleteSupabaseTodo(task);
+    }
   });
 
-  el("taskForm").addEventListener("submit", (event) => {
+  el("taskForm").addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (!currentSupabaseUser && !currentUser) {
+      openAuthModal("Please log in to add and sync study tasks.");
+      return;
+    }
     const title = el("taskInput").value.trim();
     if (!title) return;
     const color = el("taskColorInput") ? el("taskColorInput").value : "#ff6e79";
-    data.tasks.push({ title, tag: el("taskTagInput").value, done: false, date: getLocalDateString(), color });
+    const tag = el("taskTagInput") ? el("taskTagInput").value : "Review";
+    const todayStr = getLocalDateString();
+    const newTask = {
+      title,
+      tag,
+      done: false,
+      is_completed: false,
+      date: todayStr,
+      color
+    };
+    data.tasks = data.tasks || [];
+    data.tasks.push(newTask);
     el("taskInput").value = "";
     saveUser();
     renderTasks();
+
+    if (currentSupabaseUser) {
+      await addSupabaseTodo(newTask);
+      renderTasks();
+    }
   });
 
   el("timeButton").addEventListener("click", renderProgress);
@@ -4667,6 +5233,29 @@ function bindEvents() {
 
 bindEvents();
 setAuthMode("login");
-if (currentUser && data) {
+
+if (supabaseClient) {
+  // Listen for Supabase auth state changes
+  supabaseClient.auth.onAuthStateChange(async (event, session) => {
+    if (session?.user) {
+      login(session.user.email, session.user);
+    } else if (event === "SIGNED_OUT") {
+      logout();
+    }
+  });
+
+  // Check active session on startup
+  supabaseClient.auth.getSession().then(({ data: { session } }) => {
+    if (session?.user) {
+      login(session.user.email, session.user);
+    } else if (currentUser && data) {
+      login(currentUser);
+    }
+  }).catch(() => {
+    if (currentUser && data) {
+      login(currentUser);
+    }
+  });
+} else if (currentUser && data) {
   login(currentUser);
 }
