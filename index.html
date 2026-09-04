@@ -45,12 +45,10 @@
       <aside class="sidebar" aria-label="Study sections">
         <button class="nav-item active" data-page="Dashboard" title="Dashboard">✽</button>
         <button class="nav-item" data-page="Flashcards" title="Flashcards">◈</button>
-        <button class="nav-item" data-page="File Reader" title="File Reader">▤</button>
-        <button class="nav-item" data-page="Notes" title="Notes">✎</button>
         <button class="nav-item" data-page="Calendar" title="Calendar">◷</button>
+        <button class="nav-item" data-page="Resources" title="Shared Resources">▤</button>
         <span class="nav-divider"></span>
         <button class="nav-item" data-page="Analytics" title="Analytics">▥</button>
-        <button class="nav-item" data-page="Library" title="Library">▧</button>
         <div class="sidebar-bottom">
             <button id="settingsButton" class="nav-item" title="Settings">⚙</button>
           <button id="userButton" class="avatar" title="Account">SA</button>
@@ -134,6 +132,18 @@
                   <div class="setting-row-input-wrapper">
                     <input id="targetSessionsInput" type="number" min="1" max="24" step="1" value="4" aria-label="Target daily sessions count" />
                     <span>s</span>
+                  </div>
+                </div>
+                <div class="setting-row">
+                  <label for="timerSubjectSelect">Subject</label>
+                  <div class="setting-row-input-wrapper" style="width: auto;">
+                    <select id="timerSubjectSelect" style="background: transparent; border: none; color: var(--text); font-size: 11px; font-weight: 600; outline: none; cursor: pointer; text-align: right;">
+                      <option value="General">General</option>
+                      <option value="Pathology">Pathology</option>
+                      <option value="Pharmacology">Pharmacology</option>
+                      <option value="Anatomy">Anatomy</option>
+                      <option value="Exams">Exams</option>
+                    </select>
                   </div>
                 </div>
               </div>
@@ -252,97 +262,45 @@
           </div>
         </section>
 
-        <section id="fileReaderPage" class="page-view hidden">
-          <div class="notes-layout">
-            <aside class="panel notes-sidebar">
-              <div class="panel-kicker">PDF File Library</div>
-              
-              <div class="notes-upload-section">
-                <!-- Upload Personal Note PDF -->
-                <label class="primary-action import-btn-label" style="display: block; text-align: center; margin-bottom: 10px;">
-                  Import Personal PDF
-                  <input type="file" id="personalNotesInput" accept=".pdf" class="hidden" />
-                </label>
-                <!-- Upload Shared Reference PDF (Host Only) -->
-                <label id="hostUploadWrapper" class="secondary-action import-btn-label hidden" style="display: block; text-align: center; cursor: pointer;">
-                  Upload Shared Host PDF
-                  <input type="file" id="hostNotesInput" accept=".pdf" class="hidden" />
-                </label>
-              </div>
-
-              <div class="notes-section-title">Shared References</div>
-              <div id="sharedNotesList" class="notes-file-list">
-                <!-- Shared host files render here -->
-              </div>
-
-              <div class="notes-section-title">My Personal Notes</div>
-              <div id="personalNotesList" class="notes-file-list">
-                <!-- User personal files render here -->
-              </div>
-            </aside>
-
-            <article class="panel notes-viewer">
-              <div class="notes-viewer-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; width: 100%;">
-                <div class="panel-kicker" id="activeNoteTitle" style="margin-bottom: 0;">No Document Selected</div>
-                <div style="display: flex; align-items: center; gap: 10px;">
-                  <button type="button" id="notesFocusToggleBtn" class="pill hidden" style="font-size: 11px; padding: 4px 10px;" title="Toggle Reader Focus Mode">⛶ Focus Mode</button>
-                  <button type="button" id="closeNoteBtn" class="close-deck-btn hidden" title="Close Document">✕</button>
+        <!-- Shared Resources Hub Tab -->
+        <section id="resourcesPage" class="page-view hidden">
+          <div class="library-layout" style="display: flex; flex-direction: column; gap: 20px; padding: 20px; overflow-y: auto; height: 100%;">
+            
+            <!-- Shared Resources Header Search & Filter -->
+            <div class="library-header-panel" style="display: flex; flex-direction: column; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; width: 100%;">
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;">
+                <div>
+                  <h3 style="font-size: 16px; font-weight: 700; margin: 0; color: var(--text);">Shared Resource Hub</h3>
+                  <p style="font-size: 11px; color: var(--muted); margin: 4px 0 0 0;">Access study materials, lecture summaries, and reference documents shared with the community.</p>
+                </div>
+                <div style="position: relative; width: 100%; max-width: 340px;">
+                  <input type="text" id="resourceSearchInput" placeholder="Search resources by title or subject..." style="width: 100%; padding: 10px 14px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--text); outline: none; transition: border-color 0.2s;" />
                 </div>
               </div>
-              <div id="notesViewerContainer" class="notes-viewer-container">
-                <div class="notes-empty-state">
-                  <div class="empty-icon">🗀</div>
-                  <h3>Ready to read?</h3>
-                  <p>Select a shared reference or upload your own study guide PDF to start reading right here.</p>
-                </div>
-              </div>
-            </article>
-          </div>
-        </section>
 
-        <!-- New Dedicated Notes Tab -->
-        <section id="notesPage" class="page-view hidden">
-          <div class="notes-layout">
-            <aside class="panel notes-sidebar">
-              <div class="panel-kicker">Notes Directory</div>
-              <div class="notes-upload-section">
-                <button type="button" class="primary-action" id="createNewNoteBtn" style="width: 100%;">+ Create New Note</button>
-              </div>
-              <div class="notes-section-title">PDF Summaries</div>
-              <div id="notesLinkedDirectoryList" class="notes-file-list">
-                <!-- Linked notes list renders here -->
-              </div>
-              <div class="notes-section-title">Independent Notes</div>
-              <div id="notesUnlinkedDirectoryList" class="notes-file-list">
-                <!-- Unlinked notes list renders here -->
-              </div>
-            </aside>
-
-            <article class="panel notes-viewer">
-              <div class="notes-viewer-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; width: 100%;">
-                <div class="panel-kicker" id="activeEditorNoteTitle" style="margin-bottom: 0;">No Note Selected</div>
-                <div style="display: flex; gap: 8px; align-items: center;">
-                  <button type="button" id="toggleNotePreviewBtn" class="small-nav-btn hidden" style="background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; font-size: 11px; color: var(--text); cursor: pointer;">👁 Preview</button>
-                  <button type="button" id="downloadNoteBtn" class="small-nav-btn hidden" style="background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; font-size: 11px; color: var(--text); cursor: pointer;" title="Download as Markdown">↓ Download</button>
-                  <button type="button" id="deleteActiveNoteBtn" class="close-deck-btn hidden" title="Delete Note" style="color: var(--red); margin: 0; padding: 4px 8px;">✕</button>
-                </div>
-              </div>
-              
-              <div id="notesEditorContainer" class="notes-viewer-container" style="padding: 16px; display: flex; flex-direction: column; gap: 12px; background: var(--panel-2); overflow-y: auto;">
-                <div class="notes-empty-state" id="editorEmptyState">
-                  <div class="empty-icon">✎</div>
-                  <h3>Your Study Notebook</h3>
-                  <p>Create a new note or select an existing document summary to start editing your notes.</p>
+              <!-- Filter tabs & Stats Summary -->
+              <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--line); padding-top: 12px; flex-wrap: wrap; gap: 12px;">
+                <div id="resourceSubjectFilters" class="library-filter-tabs" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                  <button type="button" class="lib-tab active" data-subject="all" style="padding: 6px 12px; font-size: 11px; font-weight: 700; background: var(--purple); color: #fff; border: none; border-radius: 6px; cursor: pointer;">All</button>
+                  <button type="button" class="lib-tab" data-subject="Pathology" style="padding: 6px 12px; font-size: 11px; font-weight: 700; background: var(--panel-2); color: var(--soft); border: 1px solid var(--line); border-radius: 6px; cursor: pointer;">Pathology</button>
+                  <button type="button" class="lib-tab" data-subject="Pharmacology" style="padding: 6px 12px; font-size: 11px; font-weight: 700; background: var(--panel-2); color: var(--soft); border: 1px solid var(--line); border-radius: 6px; cursor: pointer;">Pharmacology</button>
+                  <button type="button" class="lib-tab" data-subject="Anatomy" style="padding: 6px 12px; font-size: 11px; font-weight: 700; background: var(--panel-2); color: var(--soft); border: 1px solid var(--line); border-radius: 6px; cursor: pointer;">Anatomy</button>
+                  <button type="button" class="lib-tab" data-subject="Exams" style="padding: 6px 12px; font-size: 11px; font-weight: 700; background: var(--panel-2); color: var(--soft); border: 1px solid var(--line); border-radius: 6px; cursor: pointer;">Exams</button>
+                  <button type="button" class="lib-tab" data-subject="General" style="padding: 6px 12px; font-size: 11px; font-weight: 700; background: var(--panel-2); color: var(--soft); border: 1px solid var(--line); border-radius: 6px; cursor: pointer;">General</button>
                 </div>
                 
-                <div id="editorActiveWorkspace" class="hidden" style="display: flex; flex-direction: column; gap: 12px; height: 100%; width: 100%;">
-                  <input id="noteTitleInput" type="text" placeholder="Note Title..." style="width: 100%; background: transparent; border: none; border-bottom: 1px solid var(--line); color: var(--text); font-size: 18px; font-weight: 700; padding: 6px 0; outline: none;" />
-                  <textarea id="noteContentTextarea" placeholder="Write your notes here... Use this editor to summarize your studies." style="flex: 1; width: 100%; background: transparent; border: none; color: var(--soft); font-size: 13px; line-height: 1.6; resize: none; outline: none; font-family: inherit; padding: 6px 0;"></textarea>
-                  <div id="noteMarkdownPreview" class="hidden" style="flex: 1; width: 100%; color: var(--soft); font-size: 13px; line-height: 1.6; overflow-y: auto; padding: 6px 0; border: none; outline: none; font-family: inherit; text-align: left; background: transparent;"></div>
-                  <div style="font-size: 10px; color: var(--muted); text-align: right;" id="editorSaveStatus">All changes saved locally</div>
+                <div style="display: flex; gap: 16px; font-size: 11px; color: var(--muted); align-items: center;">
+                  <span id="resourceCountLabel">0 resources available</span>
+                  <button type="button" id="refreshResourcesBtn" class="small-nav-btn" style="background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; font-size: 11px; color: var(--text); cursor: pointer;" title="Refresh list">↻ Refresh</button>
                 </div>
               </div>
-            </article>
+            </div>
+
+            <!-- Shared Resources Items Grid -->
+            <div id="sharedResourcesGrid" class="library-items-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; width: 100%;">
+              <!-- Dynamic Cards generated by Javascript -->
+            </div>
+            
           </div>
         </section>
 
@@ -461,47 +419,6 @@
                 </div>
               </div>
             </article>
-            
-          </div>
-        </section>
-
-        <!-- New Dedicated Library Tab -->
-        <section id="libraryPage" class="page-view hidden">
-          <div class="library-layout" style="display: flex; flex-direction: column; gap: 20px; padding: 20px; overflow-y: auto; height: 100%;">
-            
-            <!-- Library Header Search & Filter -->
-            <div class="library-header-panel" style="display: flex; flex-direction: column; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; width: 100%;">
-              <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;">
-                <div>
-                  <h3 style="font-size: 16px; font-weight: 700; margin: 0; color: var(--text);">Unified Library Hub</h3>
-                  <p style="font-size: 11px; color: var(--muted); margin: 4px 0 0 0;">Search and manage your documents, study notes, and flashcard decks.</p>
-                </div>
-                <div style="position: relative; width: 100%; max-width: 320px;">
-                  <input type="text" id="librarySearchInput" placeholder="Search files, notes, decks..." style="width: 100%; padding: 10px 14px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--text); outline: none; transition: border-color 0.2s;" />
-                </div>
-              </div>
-
-              <!-- Filters tabs & Stats Summary -->
-              <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--line); padding-top: 12px; flex-wrap: wrap; gap: 12px;">
-                <div class="library-filter-tabs" style="display: flex; gap: 8px;">
-                  <button type="button" class="lib-tab active" data-filter="all" style="padding: 6px 12px; font-size: 11px; font-weight: 700; background: var(--purple); color: #fff; border: none; border-radius: 6px; cursor: pointer;">All Assets</button>
-                  <button type="button" class="lib-tab" data-filter="file" style="padding: 6px 12px; font-size: 11px; font-weight: 700; background: var(--panel-2); color: var(--soft); border: 1px solid var(--line); border-radius: 6px; cursor: pointer;">PDF Files</button>
-                  <button type="button" class="lib-tab" data-filter="note" style="padding: 6px 12px; font-size: 11px; font-weight: 700; background: var(--panel-2); color: var(--soft); border: 1px solid var(--line); border-radius: 6px; cursor: pointer;">Study Notes</button>
-                  <button type="button" class="lib-tab" data-filter="deck" style="padding: 6px 12px; font-size: 11px; font-weight: 700; background: var(--panel-2); color: var(--soft); border: 1px solid var(--line); border-radius: 6px; cursor: pointer;">Anki Decks</button>
-                </div>
-                
-                <div style="display: flex; gap: 16px; font-size: 11px; color: var(--muted);">
-                  <div>PDFs: <strong id="libStatFiles" style="color: var(--mint);">0</strong></div>
-                  <div>Notes: <strong id="libStatNotes" style="color: var(--purple);">0</strong></div>
-                  <div>Decks: <strong id="libStatDecks" style="color: var(--amber);">0</strong></div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Library Items Grid -->
-            <div id="libraryItemsGrid" class="library-items-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; width: 100%;">
-              <!-- Dynamic Cards generated by Javascript -->
-            </div>
             
           </div>
         </section>
@@ -626,6 +543,11 @@
           <div style="display: flex; flex-direction: column; gap: 4px;">
             <label style="font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700;">Event Title</label>
             <input type="text" id="modalEventTitle" placeholder="Add title..." required style="padding: 8px 12px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); outline: none; width: 100%;" />
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700;">Category</label>
+            <input type="text" id="modalEventCategory" placeholder="e.g. Lecture, Exam, Study, General" value="General" style="padding: 8px 12px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); outline: none; width: 100%;" />
           </div>
 
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">

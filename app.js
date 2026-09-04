@@ -146,6 +146,9 @@ try {
 let currentSupabaseUser = null;
 let supabaseRealtimeChannel = null;
 let modalAuthMode = "login";
+let userStudySessions = [];
+let sharedResourcesList = [];
+let selectedResourceSubjectFilter = "all";
 
 let db = loadDb();
 let currentUser = localStorage.getItem(`${storeKey}:session`);
@@ -336,7 +339,7 @@ function setupSupabaseRealtime(userId) {
 
   try {
     supabaseRealtimeChannel = supabaseClient
-      .channel("public:todos")
+      .channel("study_assistant_realtime")
       .on(
         "postgres_changes",
         {
@@ -349,10 +352,350 @@ function setupSupabaseRealtime(userId) {
           fetchUserTodos();
         }
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "events",
+          filter: `user_id=eq.${userId}`
+        },
+        () => {
+          fetchUserEvents();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "study_sessions",
+          filter: `user_id=eq.${userId}`
+        },
+        () => {
+          fetchUserStudySessions().then(() => {
+            if (typeof renderAnalyticsTab === "function") renderAnalyticsTab();
+          });
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "shared_resources"
+        },
+        () => {
+          fetchSharedResources();
+        }
+      )
       .subscribe();
   } catch (err) {
     console.warn("Could not subscribe to Supabase Realtime:", err);
   }
+}
+
+// ----------------------------------------------------
+// Supabase Cloud Events Sync Functions
+// Table Schema: id (int8), user_id (uuid), title (text), date (text), category (text), color (text)
+// ----------------------------------------------------
+
+async function fetchUserEvents() {
+  if (!supabaseClient || !currentSupabaseUser) {
+    if (data && !currentUser) data.calendarEvents = [];
+    if (typeof renderCalendarTab === "function") renderCalendarTab();
+    return;
+  }
+
+  try {
+    const { data: rows, error } = await supabaseClient
+      .from("events")
+      .select("id, user_id, title, date, category, color")
+      .eq("user_id", currentSupabaseUser.id)
+      .order("id", { ascending: false });
+
+    if (error) {
+      console.error("Failed to fetch events from Supabase:", error);
+      return;
+    }
+
+    if (data) {
+      data.calendarEvents = (rows || []).map((row) => ({
+        id: String(row.id),
+        supabaseId: row.id,
+        title: row.title || "Untitled Event",
+        date: row.date,
+        category: row.category || "General",
+        color: row.color || "#7c67ff",
+        startTime: "09:00",
+        endTime: "10:00"
+      }));
+
+      saveUser();
+      if (typeof renderCalendarTab === "function") renderCalendarTab();
+    }
+  } catch (err) {
+    console.error("fetchUserEvents exception:", err);
+  }
+}
+
+async function addSupabaseEvent(evt) {
+  if (!supabaseClient || !currentSupabaseUser) return;
+  try {
+    const payload = {
+      user_id: currentSupabaseUser.id,
+      title: evt.title || "Untitled Event",
+      date: evt.date,
+      category: evt.category || "General",
+      color: evt.color || "#7c67ff"
+    };
+
+    const { data: inserted, error } = await supabaseClient
+      .from("events")
+      .insert([payload])
+      .select();
+
+    if (error) {
+      console.error("Failed to insert event into Supabase:", error);
+      return;
+    }
+
+    if (inserted && inserted.length > 0) {
+      evt.id = String(inserted[0].id);
+      evt.supabaseId = inserted[0].id;
+      saveUser();
+    }
+  } catch (err) {
+    console.error("addSupabaseEvent exception:", err);
+  }
+}
+
+async function updateSupabaseEvent(evt) {
+  if (!supabaseClient || !currentSupabaseUser) return;
+  const targetId = evt.supabaseId || evt.id;
+  if (!targetId) return;
+
+  try {
+    const payload = {
+      title: evt.title,
+      date: evt.date,
+      category: evt.category || "General",
+      color: evt.color || "#7c67ff"
+    };
+
+    const { error } = await supabaseClient
+      .from("events")
+      .update(payload)
+      .eq("id", targetId)
+      .eq("user_id", currentSupabaseUser.id);
+
+    if (error) {
+      console.error("Failed to update event in Supabase:", error);
+    }
+  } catch (err) {
+    console.error("updateSupabaseEvent exception:", err);
+  }
+}
+
+async function deleteSupabaseEvent(idOrEvt) {
+  if (!supabaseClient || !currentSupabaseUser) return;
+  const targetId = (typeof idOrEvt === "object" && idOrEvt !== null) 
+    ? (idOrEvt.supabaseId || idOrEvt.id) 
+    : idOrEvt;
+  if (!targetId) return;
+
+  try {
+    const { error } = await supabaseClient
+      .from("events")
+      .delete()
+      .eq("id", targetId)
+      .eq("user_id", currentSupabaseUser.id);
+
+    if (error) {
+      console.error("Failed to delete event from Supabase:", error);
+    }
+  } catch (err) {
+    console.error("deleteSupabaseEvent exception:", err);
+  }
+}
+
+// ----------------------------------------------------
+// Supabase Cloud Study Sessions Functions
+// Table Schema: id (int8), user_id (uuid), subject (text), duration_minutes (int4), session_type (text), created_at (timestamptz)
+// ----------------------------------------------------
+
+async function logStudySession(durationMinutes, subject = "General", sessionType = "focus") {
+  if (!supabaseClient || !currentSupabaseUser) return null;
+  try {
+    const payload = {
+      user_id: currentSupabaseUser.id,
+      subject: subject || "General",
+      duration_minutes: Math.max(1, Math.round(Number(durationMinutes) || 25)),
+      session_type: sessionType || "focus"
+    };
+
+    const { data: inserted, error } = await supabaseClient
+      .from("study_sessions")
+      .insert([payload])
+      .select();
+
+    if (error) {
+      console.error("Failed to insert study session into Supabase:", error);
+      return null;
+    }
+
+    if (inserted && inserted.length > 0) {
+      userStudySessions.push(inserted[0]);
+    }
+    return inserted?.[0] || null;
+  } catch (err) {
+    console.error("logStudySession exception:", err);
+    return null;
+  }
+}
+
+async function fetchUserStudySessions() {
+  if (!supabaseClient || !currentSupabaseUser) {
+    userStudySessions = [];
+    return [];
+  }
+
+  try {
+    const { data: rows, error } = await supabaseClient
+      .from("study_sessions")
+      .select("id, user_id, subject, duration_minutes, session_type, created_at")
+      .eq("user_id", currentSupabaseUser.id)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.error("Failed to fetch study sessions from Supabase:", error);
+      return [];
+    }
+
+    userStudySessions = rows || [];
+    return userStudySessions;
+  } catch (err) {
+    console.error("fetchUserStudySessions exception:", err);
+    return [];
+  }
+}
+
+// ----------------------------------------------------
+// Supabase Shared Resources Hub Functions (Public Read)
+// Table Schema: id (int8), title (text), subject (text), file_url (text), created_at (timestamptz)
+// ----------------------------------------------------
+
+async function fetchSharedResources() {
+  if (!supabaseClient) {
+    sharedResourcesList = [];
+    renderSharedResourcesTab();
+    return [];
+  }
+
+  try {
+    const { data: rows, error } = await supabaseClient
+      .from("shared_resources")
+      .select("id, title, subject, file_url, created_at")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Failed to fetch shared resources from Supabase:", error);
+      return [];
+    }
+
+    sharedResourcesList = rows || [];
+    renderSharedResourcesTab();
+    return sharedResourcesList;
+  } catch (err) {
+    console.error("fetchSharedResources exception:", err);
+    return [];
+  }
+}
+
+function renderSharedResourcesTab() {
+  const grid = el("sharedResourcesGrid");
+  if (!grid) return;
+
+  const searchQuery = el("resourceSearchInput")?.value.trim().toLowerCase() || "";
+  const activeSubject = selectedResourceSubjectFilter || "all";
+
+  // Filter items
+  const filtered = (sharedResourcesList || []).filter(res => {
+    const titleMatch = (res.title || "").toLowerCase().includes(searchQuery);
+    const subjectMatch = (res.subject || "").toLowerCase().includes(searchQuery);
+    const matchesSearch = !searchQuery || titleMatch || subjectMatch;
+    
+    const matchesSubject = activeSubject === "all" || 
+      (res.subject || "").toLowerCase() === activeSubject.toLowerCase();
+
+    return matchesSearch && matchesSubject;
+  });
+
+  // Update count label
+  const countLabel = el("resourceCountLabel");
+  if (countLabel) {
+    countLabel.textContent = `${filtered.length} of ${sharedResourcesList.length} resources available`;
+  }
+
+  // Update active subject filter buttons
+  document.querySelectorAll("#resourceSubjectFilters .lib-tab").forEach(btn => {
+    const subj = btn.dataset.subject || "all";
+    const isActive = subj.toLowerCase() === activeSubject.toLowerCase();
+    btn.classList.toggle("active", isActive);
+    btn.style.background = isActive ? "var(--purple)" : "var(--panel-2)";
+    btn.style.color = isActive ? "#fff" : "var(--soft)";
+    btn.style.borderColor = isActive ? "var(--purple)" : "var(--line)";
+  });
+
+  if (filtered.length === 0) {
+    grid.innerHTML = `
+      <div style="grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 20px; background: var(--panel); border: 1px dashed var(--line); border-radius: 12px; text-align: center;">
+        <div style="font-size: 36px; margin-bottom: 12px; opacity: 0.6;">▤</div>
+        <h4 style="font-size: 15px; font-weight: 700; color: var(--text); margin: 0 0 6px 0;">No shared resources found</h4>
+        <p style="font-size: 12px; color: var(--muted); margin: 0; max-width: 320px;">
+          ${searchQuery ? "Try refining your search terms or selecting 'All' subjects." : "No community study materials have been published yet."}
+        </p>
+      </div>
+    `;
+    return;
+  }
+
+  const subjectColors = {
+    pathology: "#7c67ff",
+    pharmacology: "#58ddd2",
+    anatomy: "#ffb329",
+    exams: "#ff6e79",
+    general: "#3b82f6"
+  };
+
+  grid.innerHTML = filtered.map(item => {
+    const subjKey = (item.subject || "General").toLowerCase();
+    const tagColor = subjectColors[subjKey] || "#7c67ff";
+    const formattedDate = item.created_at 
+      ? new Date(item.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+      : "Recent";
+
+    return `
+      <article class="panel resource-card" style="padding: 18px; display: flex; flex-direction: column; justify-content: space-between; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; transition: transform 0.2s, box-shadow 0.2s;">
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+            <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; padding: 3px 8px; border-radius: 4px; background: ${tagColor}22; color: ${tagColor}; border: 1px solid ${tagColor}44;">
+              ${escapeHtml(item.subject || "General")}
+            </span>
+            <span style="font-size: 11px; color: var(--muted);">${formattedDate}</span>
+          </div>
+          <h4 style="font-size: 14px; font-weight: 700; color: var(--text); margin: 4px 0 0 0; line-height: 1.4; word-break: break-word;">
+            ${escapeHtml(item.title || "Untitled Resource")}
+          </h4>
+        </div>
+        <div>
+          <a href="${escapeHtml(item.file_url || '#')}" target="_blank" rel="noopener noreferrer" class="primary-action" style="display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; width: 100%; padding: 8px 12px; font-size: 11px; font-weight: 700; border-radius: 6px; box-sizing: border-box;">
+            <span>↗</span> Open / Download
+          </a>
+        </div>
+      </article>
+    `;
+  }).join("");
 }
 
 // ----------------------------------------------------
@@ -634,7 +977,7 @@ async function login(email, supabaseUser = null) {
   renderAll();
   startTimerLoop();
 
-  // Supabase cloud tasks fetch & realtime sync
+  // Supabase cloud data fetch & realtime sync
   if (supabaseClient) {
     if (!currentSupabaseUser) {
       try {
@@ -646,8 +989,11 @@ async function login(email, supabaseUser = null) {
     }
     if (currentSupabaseUser) {
       fetchUserTodos();
+      fetchUserEvents();
+      fetchUserStudySessions();
       setupSupabaseRealtime(currentSupabaseUser.id);
     }
+    fetchSharedResources();
   }
 }
 
@@ -667,8 +1013,10 @@ async function logout() {
 
   currentSupabaseUser = null;
   currentUser = null;
+  userStudySessions = [];
   if (data) {
     data.tasks = []; // Clear tasks when logged out
+    data.calendarEvents = [];
   }
   data = null;
   currentStudyDeck = null;
@@ -1157,22 +1505,35 @@ function stopTimerLoop() {
 function completeTimerSession() {
   playTone("complete");
   if (data.timerMode === "focus") {
+    const durationMinutes = Number(data.timerFocusDurationMin) || 25;
+    const subjectEl = el("timerSubjectSelect");
+    const activeSubject = subjectEl ? subjectEl.value : (data.subjects && data.subjects[0] ? data.subjects[0].name : "General");
+
     data.timerSession = (data.timerSession || 0) + 1;
     data.sessionsToday = (data.sessionsToday || 0) + 1;
     const todayStr = getLocalDateString();
     data.dailySessions = data.dailySessions || {};
     data.dailySessions[todayStr] = data.sessionsToday;
 
+    data.dailyStudy = data.dailyStudy || {};
+    data.dailyStudy[todayStr] = (data.dailyStudy[todayStr] || 0) + (durationMinutes * 60);
+
     const { currentStreak } = getStreakData();
     data.streak = currentStreak;
     data.bestStreak = Math.max(data.bestStreak || 0, currentStreak);
     
+    // Log to Supabase study_sessions table
+    if (currentSupabaseUser) {
+      logStudySession(durationMinutes, activeSubject, "focus");
+    }
+
     data.timerMode = "break";
   } else {
     data.timerMode = "focus";
   }
   data.timerRemaining = getTimerDuration(data.timerMode);
   data.timerRunning = false;
+  saveUser();
   renderStats();
   renderTimer();
 }
@@ -2477,10 +2838,69 @@ window.deleteActiveIndependentNote = deleteActiveIndependentNote;
 async function renderAnalyticsTab() {
   if (!data) return;
 
+  // Fetch live study sessions from Supabase if authenticated
+  if (currentSupabaseUser) {
+    await fetchUserStudySessions();
+  }
+
+  // If we have study_sessions loaded from Supabase, sync metrics into data.dailyStudy and data.dailySessions
+  if (userStudySessions && userStudySessions.length > 0) {
+    data.dailyStudy = data.dailyStudy || {};
+    data.dailySessions = data.dailySessions || {};
+
+    const aggregatedDailyStudy = {};
+    const aggregatedDailySessions = {};
+
+    userStudySessions.forEach(s => {
+      const mins = Number(s.duration_minutes) || 0;
+      const dateStr = s.created_at ? s.created_at.substring(0, 10) : getLocalDateString();
+      aggregatedDailyStudy[dateStr] = (aggregatedDailyStudy[dateStr] || 0) + (mins * 60);
+      aggregatedDailySessions[dateStr] = (aggregatedDailySessions[dateStr] || 0) + 1;
+    });
+
+    Object.keys(aggregatedDailyStudy).forEach(d => {
+      data.dailyStudy[d] = Math.max(data.dailyStudy[d] || 0, aggregatedDailyStudy[d]);
+    });
+    Object.keys(aggregatedDailySessions).forEach(d => {
+      data.dailySessions[d] = Math.max(data.dailySessions[d] || 0, aggregatedDailySessions[d]);
+    });
+
+    // Calculate streak from active study dates
+    const studiedDates = Object.keys(data.dailyStudy).filter(d => data.dailyStudy[d] > 0).sort();
+    if (studiedDates.length > 0) {
+      let streakCount = 0;
+      let checkDate = new Date();
+      const todayStr = checkDate.toISOString().split("T")[0];
+      if (studiedDates.includes(todayStr)) {
+        streakCount++;
+        checkDate.setDate(checkDate.getDate() - 1);
+      } else {
+        checkDate.setDate(checkDate.getDate() - 1);
+        if (studiedDates.includes(checkDate.toISOString().split("T")[0])) {
+          streakCount++;
+          checkDate.setDate(checkDate.getDate() - 1);
+        }
+      }
+      while (streakCount > 0 && studiedDates.includes(checkDate.toISOString().split("T")[0])) {
+        streakCount++;
+        checkDate.setDate(checkDate.getDate() - 1);
+      }
+      if (streakCount > 0) {
+        data.streak = streakCount;
+        data.bestStreak = Math.max(data.bestStreak || 0, streakCount);
+        renderStats();
+      }
+    }
+  }
+
   // 1. Calculate overview metrics
   // Total study time sum
   const dailyStudy = data.dailyStudy || {};
-  const totalSeconds = Object.values(dailyStudy).reduce((acc, val) => acc + (Number(val) || 0), 0);
+  let totalSeconds = Object.values(dailyStudy).reduce((acc, val) => acc + (Number(val) || 0), 0);
+  if (userStudySessions && userStudySessions.length > 0) {
+    const supabaseSessionSecs = userStudySessions.reduce((acc, s) => acc + (Number(s.duration_minutes) || 0) * 60, 0);
+    totalSeconds = Math.max(totalSeconds, supabaseSessionSecs);
+  }
   const totalHrs = Math.floor(totalSeconds / 3600);
   const totalMins = Math.floor((totalSeconds % 3600) / 60);
   el("analyticTotalHours").textContent = `${totalHrs}h ${totalMins}m`;
@@ -2491,7 +2911,10 @@ async function renderAnalyticsTab() {
 
   // Focus sessions completed
   const dailySessions = data.dailySessions || {};
-  const totalSessions = Object.values(dailySessions).reduce((acc, val) => acc + (Number(val) || 0), 0);
+  let totalSessions = Object.values(dailySessions).reduce((acc, val) => acc + (Number(val) || 0), 0);
+  if (userStudySessions && userStudySessions.length > 0) {
+    totalSessions = Math.max(totalSessions, userStudySessions.length);
+  }
   el("analyticTotalSessions").textContent = totalSessions.toLocaleString();
 
   // Consistency Ratio: studied dates in last 30 days vs total tracked
@@ -2832,22 +3255,24 @@ function renderSubjectStudyDistribution() {
   const container = el("subjectAnalyticsChartContainer");
   if (!container) return;
 
-  const subjects = {
-    "Path": 0,
-    "Pharm": 0,
-    "Exam": 0,
-    "Review": 0
-  };
+  const subjects = {};
 
-  const tasks = data.tasks || [];
-  tasks.forEach(t => {
-    const tag = t.tag || "Review";
-    if (subjects[tag] !== undefined) {
-      subjects[tag]++;
-    } else {
-      subjects[tag] = 1;
-    }
-  });
+  if (userStudySessions && userStudySessions.length > 0) {
+    userStudySessions.forEach(s => {
+      const subj = s.subject || "General";
+      subjects[subj] = (subjects[subj] || 0) + 1;
+    });
+  } else {
+    const tasks = data.tasks || [];
+    tasks.forEach(t => {
+      const tag = t.tag || "Review";
+      subjects[tag] = (subjects[tag] || 0) + 1;
+    });
+  }
+
+  if (Object.keys(subjects).length === 0) {
+    subjects["General"] = 0;
+  }
 
   const labelMap = {
     "Path": "Pathology",
@@ -2858,13 +3283,19 @@ function renderSubjectStudyDistribution() {
 
   const colors = {
     "Path": "#7c67ff",
+    "Pathology": "#7c67ff",
     "Pharm": "#58ddd2",
-    "Exam": "#ffb329",
-    "Review": "#ff6e79"
+    "Pharmacology": "#58ddd2",
+    "Anatomy": "#ffb329",
+    "Exam": "#ff6e79",
+    "Exams": "#ff6e79",
+    "Review": "#a78bfa",
+    "General": "#3b82f6"
   };
 
-  const keys = Object.keys(subjects);
-  const maxCount = Math.max(...Object.values(subjects), 1);
+  const palette = ["#7c67ff", "#58ddd2", "#ffb329", "#ff6e79", "#3b82f6", "#10b981", "#ec4899"];
+  const keys = Object.keys(subjects).slice(0, 5);
+  const maxCount = Math.max(...keys.map(k => subjects[k]), 1);
 
   let svgContent = `<svg width="100%" height="200" viewBox="0 0 400 200" style="background: transparent;">`;
 
@@ -2873,7 +3304,7 @@ function renderSubjectStudyDistribution() {
     const percentage = count / maxCount;
     const barWidth = Math.round(percentage * 240);
     const y = 20 + idx * 42;
-    const color = colors[key] || "#7c67ff";
+    const color = colors[key] || palette[idx % palette.length];
     const label = labelMap[key] || key;
 
     svgContent += `
@@ -3236,7 +3667,7 @@ function gatherCalendarEvents() {
     data.tasks.forEach((task, idx) => {
       const dateStr = task.date || getLocalDateString();
       events.push({
-        id: "task-" + idx,
+        id: task.id || ("task-" + idx),
         type: "task",
         title: `Task: ${task.title}`,
         date: dateStr,
@@ -3276,10 +3707,11 @@ function gatherCalendarEvents() {
         type: "custom",
         title: evt.title,
         date: evt.date,
+        category: evt.category || "General",
         startTime: evt.startTime || "10:00",
         endTime: evt.endTime || "11:00",
         color: evt.color || "#7c67ff",
-        desc: evt.desc || ""
+        desc: evt.desc || (evt.category ? `Category: ${evt.category}` : "")
       });
     });
   }
@@ -3725,6 +4157,9 @@ function openCreateEventModal(dateStr, timeStr = "09:00") {
   el("modalEventEndTime").value = `${endHour}:${m.toString().padStart(2, "0")}`;
   
   el("modalEventColor").value = "#7c67ff";
+  if (el("modalEventCategory")) {
+    el("modalEventCategory").value = "General";
+  }
   el("modalEventDesc").value = "";
   if (el("modalEventType")) {
     el("modalEventType").value = "custom";
@@ -3752,6 +4187,9 @@ function openEditEventModal(eventId) {
   el("modalEventId").value = evt.id;
   el("modalEventTitle").value = evt.title.replace(/^Task: /, "");
   el("modalEventDate").value = evt.date;
+  if (el("modalEventCategory")) {
+    el("modalEventCategory").value = evt.category || "General";
+  }
   el("modalEventStartTime").value = evt.startTime || "09:00";
   el("modalEventEndTime").value = evt.endTime || "10:00";
   el("modalEventColor").value = evt.color || "#ff6e79";
@@ -3767,6 +4205,7 @@ function openEditEventModal(eventId) {
 async function saveCalendarEvent() {
   const title = el("modalEventTitle").value.trim();
   const date = el("modalEventDate").value;
+  const category = el("modalEventCategory") ? el("modalEventCategory").value.trim() : "General";
   const startTime = el("modalEventStartTime").value;
   const endTime = el("modalEventEndTime").value;
   const color = el("modalEventColor").value;
@@ -3805,18 +4244,33 @@ async function saveCalendarEvent() {
     };
     data.tasks.push(newTask);
     if (currentSupabaseUser) {
-      addSupabaseTodo(newTask);
+      if (id && !id.startsWith("task-")) {
+        newTask.supabaseId = id;
+        await updateSupabaseTodo(newTask);
+      } else {
+        await addSupabaseTodo(newTask);
+      }
     }
   } else {
-    data.calendarEvents.push({
+    const newEvt = {
       id: targetId,
       title,
       date,
+      category: category || "General",
       startTime,
       endTime,
       color,
       desc
-    });
+    };
+    data.calendarEvents.push(newEvt);
+    if (currentSupabaseUser) {
+      if (id && !id.startsWith("evt-") && !id.startsWith("task-")) {
+        newEvt.supabaseId = id;
+        await updateSupabaseEvent(newEvt);
+      } else {
+        await addSupabaseEvent(newEvt);
+      }
+    }
   }
 
   saveUser();
@@ -3827,10 +4281,16 @@ async function saveCalendarEvent() {
 
 async function deleteCalendarEvent(id) {
   if (confirm("Are you sure you want to delete this event?")) {
+    const isTask = (data.tasks || []).some(t => t.id === id);
+    const existingEvt = (data.calendarEvents || []).find(e => e.id === id);
     data.calendarEvents = (data.calendarEvents || []).filter(e => e.id !== id);
     data.tasks = (data.tasks || []).filter(t => t.id !== id);
     if (currentSupabaseUser) {
-      deleteSupabaseTodo({ id });
+      if (isTask) {
+        deleteSupabaseTodo({ id });
+      } else {
+        deleteSupabaseEvent(existingEvt || id);
+      }
     }
     saveUser();
     el("calendarEventModal").classList.add("hidden");
@@ -4622,7 +5082,12 @@ function bindEvents() {
   if (modalSyncNowBtn) {
     modalSyncNowBtn.addEventListener("click", async () => {
       modalSyncNowBtn.textContent = "Syncing...";
-      await fetchUserTodos();
+      await Promise.all([
+        fetchUserTodos(),
+        fetchUserEvents(),
+        fetchUserStudySessions(),
+        fetchSharedResources()
+      ]);
       setTimeout(() => {
         modalSyncNowBtn.textContent = "Synced ✓";
         setTimeout(() => {
@@ -4647,39 +5112,55 @@ function bindEvents() {
       } else if (targetPage === "Flashcards") {
         el("flashcardsPage").classList.remove("hidden");
         renderFlashcardsTab();
-      } else if (targetPage === "File Reader") {
-        el("fileReaderPage").classList.remove("hidden");
-        renderFileReaderTab();
-      } else if (targetPage === "Notes") {
-        el("notesPage").classList.remove("hidden");
-        renderNotesTab();
-      } else if (targetPage === "Analytics") {
-        el("analyticsPage").classList.remove("hidden");
-        renderAnalyticsTab();
-      } else if (targetPage === "Library") {
-        el("libraryPage").classList.remove("hidden");
-        renderLibraryTab();
       } else if (targetPage === "Calendar") {
         el("calendarPage").classList.remove("hidden");
         renderCalendarTab();
+      } else if (targetPage === "Resources") {
+        el("resourcesPage").classList.remove("hidden");
+        renderSharedResourcesTab();
+        fetchSharedResources();
+      } else if (targetPage === "Analytics") {
+        el("analyticsPage").classList.remove("hidden");
+        renderAnalyticsTab();
       }
     });
   });
 
-  const searchInput = el("librarySearchInput");
-  if (searchInput) {
-    searchInput.addEventListener("input", () => {
-      renderLibraryTab();
+  const resSearchInput = el("resourceSearchInput");
+  if (resSearchInput) {
+    resSearchInput.addEventListener("input", () => {
+      renderSharedResourcesTab();
     });
   }
 
-  document.querySelectorAll(".library-filter-tabs .lib-tab").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".library-filter-tabs .lib-tab").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      renderLibraryTab();
+  const resSubjectFilters = el("resourceSubjectFilters");
+  if (resSubjectFilters) {
+    resSubjectFilters.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-subject]");
+      if (!btn) return;
+      selectedResourceSubjectFilter = btn.dataset.subject || "all";
+      renderSharedResourcesTab();
     });
-  });
+  }
+
+  const refreshResourcesBtn = el("refreshResourcesBtn");
+  if (refreshResourcesBtn) {
+    refreshResourcesBtn.addEventListener("click", async () => {
+      refreshResourcesBtn.textContent = "Loading...";
+      await fetchSharedResources();
+      refreshResourcesBtn.textContent = "↻ Refresh";
+    });
+  }
+
+  const timerSubjectSelect = el("timerSubjectSelect");
+  if (timerSubjectSelect) {
+    timerSubjectSelect.addEventListener("change", (e) => {
+      if (data) {
+        data.activeTimerSubject = e.target.value;
+        saveUser();
+      }
+    });
+  }
 
   // Calendar Event Bindings
   const createEventBtn = el("createEventBtn");
@@ -5244,6 +5725,9 @@ bindEvents();
 setAuthMode("login");
 
 if (supabaseClient) {
+  // Fetch public shared resources
+  fetchSharedResources();
+
   // Listen for Supabase auth state changes
   supabaseClient.auth.onAuthStateChange(async (event, session) => {
     if (session?.user) {
