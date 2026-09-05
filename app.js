@@ -1,4 +1,7 @@
 const storeKey = "study-assistant-v1";
+const getStorageKey = () => currentUser ? 'duepoint_data_' + currentUser.id : 'duepoint_data_guest';
+window.getStorageKey = getStorageKey;
+
 const durations = { focus: 25 * 60, short: 5 * 60, long: 15 * 60 };
 const modeLabels = { focus: "Focusing", break: "On Break" };
 
@@ -161,8 +164,49 @@ let sharedResourcesList = [];
 let selectedResourceSubjectFilter = "all";
 
 let db = loadDb();
-let currentUser = localStorage.getItem(`${storeKey}:session`);
-let data = currentUser && db.users[currentUser] ? db.users[currentUser].data : null;
+let currentUser = null;
+const sessionUserRaw = localStorage.getItem("duepoint:session") || localStorage.getItem(`${storeKey}:session`);
+if (sessionUserRaw) {
+  try {
+    const parsed = JSON.parse(sessionUserRaw);
+    if (parsed && typeof parsed === "object" && parsed.id) {
+      currentUser = {
+        id: String(parsed.id),
+        email: parsed.email || parsed.id,
+        name: parsed.name || parsed.id,
+        toString() { return this.id; }
+      };
+    } else {
+      currentUser = {
+        id: String(sessionUserRaw),
+        email: String(sessionUserRaw),
+        name: String(sessionUserRaw).split("@")[0],
+        toString() { return this.id; }
+      };
+    }
+  } catch {
+    currentUser = {
+      id: String(sessionUserRaw),
+      email: String(sessionUserRaw),
+      name: String(sessionUserRaw).split("@")[0],
+      toString() { return this.id; }
+    };
+  }
+}
+
+let data = null;
+if (currentUser) {
+  try {
+    const scopedRaw = localStorage.getItem(getStorageKey());
+    if (scopedRaw) {
+      data = JSON.parse(scopedRaw);
+    } else if (db && db.users && db.users[currentUser.id || currentUser]) {
+      data = db.users[currentUser.id || currentUser].data;
+    }
+  } catch (e) {
+    data = null;
+  }
+}
 let authMode = "login";
 let timerId = null;
 let audioContext = null;
@@ -398,7 +442,27 @@ function saveDb() {
 
 function saveUser() {
   if (!currentUser) return;
-  db.users[currentUser].data = data;
+  const userKey = currentUser.id || currentUser;
+  if (!db.users) db.users = {};
+  if (!db.users[userKey]) {
+    db.users[userKey] = {
+      name: currentUser.name || currentUser.email || String(userKey),
+      data: data
+    };
+  } else {
+    db.users[userKey].data = data;
+  }
+
+  // Scoped user persistence
+  try {
+    const storageKey = getStorageKey();
+    const dataCopy = JSON.parse(JSON.stringify(data || defaultData()));
+    dataCopy.flashcardDecks = {};
+    localStorage.setItem(storageKey, JSON.stringify(dataCopy));
+  } catch (err) {
+    console.warn("Failed to persist scoped user data:", err);
+  }
+
   saveDb();
 }
 
@@ -812,7 +876,7 @@ function loadUserData() {
     });
 
     if (ghostIdsToDelete.length > 0 && supabaseClient && currentSupabaseUser) {
-      supabaseClient.from("study_sessions").delete().in("id", ghostIdsToDelete).then(({ error }) => {
+      supabaseClient.from("study_sessions").delete().in("id", ghostIdsToDelete).eq("user_id", currentSupabaseUser.id).then(({ error }) => {
         if (!error) console.log(`[Sanitize] Successfully purged ${ghostIdsToDelete.length} ghost session(s) from Supabase.`);
       }).catch(err => console.error("Failed to delete ghost session from Supabase:", err));
     }
@@ -1311,32 +1375,51 @@ async function handleAuth(event) {
 }
 
 async function login(email, supabaseUser = null) {
-  currentUser = email;
+  const userId = supabaseUser?.id || (email ? email.toLowerCase().trim() : "guest");
+  currentUser = {
+    id: userId,
+    email: email,
+    name: supabaseUser?.user_metadata?.name || currentSupabaseUser?.user_metadata?.name || email.split("@")[0],
+    toString() { return this.id; }
+  };
   if (supabaseUser) {
     currentSupabaseUser = supabaseUser;
   }
   localStorage.setItem(`${storeKey}:session`, email);
+  localStorage.setItem("duepoint:session", JSON.stringify({ id: userId, email: email, name: currentUser.name }));
+
+  const storageKey = getStorageKey();
+  let loadedData = null;
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (raw) {
+      loadedData = JSON.parse(raw);
+    }
+  } catch (e) {}
+
+  if (!loadedData && db.users && db.users[email]?.data) {
+    loadedData = db.users[email].data;
+  }
 
   if (!db.users[email]) {
     db.users[email] = {
-      name: supabaseUser?.user_metadata?.name || currentSupabaseUser?.user_metadata?.name || email.split("@")[0],
-      data: defaultData()
+      name: currentUser.name,
+      data: loadedData || defaultData()
     };
     saveDb();
   }
 
-  data = normalizeData(db.users[email].data || defaultData());
+  data = normalizeData(loadedData || db.users[email]?.data || defaultData());
   loadUserData();
   
   try {
-    data.flashcardDecks = await idb.get(`flashcard-decks:${email}`) || {};
+    data.flashcardDecks = await idb.get(`flashcard-decks:${currentUser.id}`) || await idb.get(`flashcard-decks:${email}`) || {};
   } catch (err) {
     console.error("Failed to load decks from IndexedDB:", err);
     data.flashcardDecks = {};
   }
   
-  db.users[email].data = data;
-  saveDb();
+  saveUser();
   const authEl = el("authView") || authView;
   const appEl = el("appView") || appView;
   if (authEl) authEl.classList.add("hidden");
@@ -1365,6 +1448,7 @@ async function login(email, supabaseUser = null) {
         const { data: sessData } = await supabaseClient.auth.getSession();
         if (sessData?.session?.user) {
           currentSupabaseUser = sessData.session.user;
+          currentUser.id = currentSupabaseUser.id;
         }
       } catch (e) {}
     }
@@ -1396,14 +1480,25 @@ async function logout() {
     }
   }
 
-  currentSupabaseUser = null;
-  currentUser = null;
-  userStudySessions = [];
-  if (data) {
-    data.tasks = []; // Clear tasks when logged out
-    data.calendarEvents = [];
+  // Strictly wipe in-memory data and caches BEFORE UI updates or redirects
+  if (typeof invalidateAnalyticsCache === "function") {
+    invalidateAnalyticsCache();
   }
-  data = null;
+  userStudySessions = [];
+  sharedResourcesList = [];
+  data = defaultData();
+  data.tasks = [];
+  data.calendarEvents = [];
+  data.flashcardDecks = {};
+  data.dailyStudy = {};
+  data.dailySessions = {};
+  data.studySeconds = 0;
+  data.sessionsToday = 0;
+  data.flashcardsToday = 0;
+  data.streak = 0;
+
+  currentUser = null;
+  currentSupabaseUser = null;
   currentStudyDeck = null;
   currentStudyCards = [];
   currentCardIndex = 0;
@@ -1416,6 +1511,7 @@ async function logout() {
     activePdfUrl = null;
   }
   localStorage.removeItem(`${storeKey}:session`);
+  localStorage.removeItem("duepoint:session");
 
   const userBtn = el("userButton");
   if (userBtn) {

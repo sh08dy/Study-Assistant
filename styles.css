@@ -204,6 +204,23 @@ button {
   color: white;
 }
 
+.nav-item svg,
+.tab-btn svg,
+.mobile-nav-btn svg,
+.sidebar-icon svg,
+.nav-icon {
+  width: 20px !important;
+  height: 20px !important;
+  min-width: 20px !important;
+  min-height: 20px !important;
+  max-width: 20px !important;
+  max-height: 20px !important;
+  flex-shrink: 0;
+  object-fit: contain;
+  display: inline-block;
+  vertical-align: middle;
+}
+
 .nav-divider {
   width: 34px;
   border-top: 1px solid var(--line);
@@ -2445,6 +2462,12 @@ body.notes-focus-active .workspace {
 
 /* Calendar Workspace & Timetable Layouts */
 .calendar-layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 20px;
+  padding: 20px;
+  height: 100%;
+  overflow: hidden;
   scrollbar-width: thin;
 }
 
@@ -2701,6 +2724,60 @@ body.notes-focus-active .workspace {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Calendar Responsive Styling for Mobile Screens */
+@media (max-width: 768px) {
+  .calendar-layout {
+    grid-template-columns: 1fr !important;
+    height: auto !important;
+    overflow-y: auto !important;
+    padding: 10px !important;
+    gap: 14px !important;
+  }
+
+  .calendar-sidebar {
+    max-height: 280px;
+  }
+
+  .calendar-workspace-header {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    justify-content: space-between !important;
+  }
+
+  .calendar-workspace-header > div {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+
+  .calendar-month-grid {
+    grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .calendar-day-cell {
+    min-height: 54px !important;
+    padding: 3px !important;
+  }
+
+  .calendar-day-number {
+    font-size: 10px !important;
+    width: 18px !important;
+    height: 18px !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .calendar-event-pill {
+    font-size: 0.65rem !important;
+    padding: 1px 3px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
 }
 
 /* High-Priority Modal Overlay and Card Interior */
