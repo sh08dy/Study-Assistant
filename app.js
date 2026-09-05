@@ -2621,6 +2621,75 @@ function cleanAnkiText(text, imagesMap = {}) {
   return doc.body.innerHTML;
 }
 
+function switchTab(pageName) {
+  const navBtn = document.querySelector(`.nav-item[data-page="${pageName}"]`);
+  if (navBtn) {
+    navBtn.click();
+  }
+}
+
+function convertDriveLink(url) {
+  const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/id=([a-zA-Z0-9_-]+)/);
+  if (match && match[1]) {
+    return `https://drive.google.com/uc?export=download&id=${match[1]}`;
+  }
+  return url;
+}
+
+async function importAnkiFromWebLink() {
+  const url = await showAppPrompt({
+    title: "Import Anki Deck via URL",
+    message: "Paste a direct download link or Google Drive share link to a .apkg file.",
+    placeholder: "https://drive.google.com/file/d/... or direct .apkg URL",
+    confirmText: "Import",
+    cancelText: "Cancel"
+  });
+
+  if (!url || !url.trim()) return;
+
+  const resolvedUrl = convertDriveLink(url.trim());
+
+  try {
+    el("studyViewContainer").innerHTML = `
+      <div class="empty-state">
+        <div class="icon">⏳</div>
+        <h3>Downloading deck...</h3>
+        <p>Fetching the .apkg file from the provided URL. Please wait.</p>
+      </div>
+    `;
+
+    const response = await fetch(resolvedUrl);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("text/html")) {
+      throw new Error("CORS_OR_HTML");
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    if (!arrayBuffer || arrayBuffer.byteLength < 100) {
+      throw new Error("The downloaded file appears to be empty or too small to be a valid .apkg file.");
+    }
+
+    const filename = url.trim().split("/").pop()?.split("?")[0] || "Web Imported Deck";
+    await importAnkiFromArrayBuffer(arrayBuffer, filename.replace(/\.apkg$/i, ""));
+    showAppAlert("Deck imported successfully from URL!", "Success");
+  } catch (err) {
+    console.error("Web link import failed:", err);
+    if (err.message === "CORS_OR_HTML" || err.message.includes("Failed to fetch") || err.message.includes("NetworkError") || err.message.includes("CORS")) {
+      showAppAlert(
+        "Could not download the file directly.\n\nIf using Google Drive, make sure the file is shared as \"Anyone with the link can view\".\n\nAlternatively, download the .apkg file to your device first, then use the \"Import .apkg file\" button.",
+        "Download Blocked (CORS)"
+      );
+    } else {
+      showAppAlert(`Import failed: ${err.message}`, "Import Error");
+    }
+  }
+}
+window.importAnkiFromWebLink = importAnkiFromWebLink;
+
 async function handleAnkiImport(event) {
   const file = event.target.files[0];
   if (!file) return;
@@ -6085,6 +6154,11 @@ function bindEvents() {
 
   el("timeButton").addEventListener("click", renderProgress);
   el("ankiFileInput").addEventListener("change", handleAnkiImport);
+
+  const importWebLinkBtn = el("importWebLinkBtn");
+  if (importWebLinkBtn) {
+    importWebLinkBtn.addEventListener("click", importAnkiFromWebLink);
+  }
 
   const createDeckBtn = el("createDeckBtn");
   if (createDeckBtn) {
