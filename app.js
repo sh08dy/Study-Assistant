@@ -3970,6 +3970,7 @@ async function renderAnalyticsTab() {
         }
       }
     });
+  }
   const useDailyFlashcardsFallback = (!Array.isArray(data.flashcardReviews) || data.flashcardReviews.length === 0) && !!(data && data.dailyFlashcards);
 
   if (!hasReviewsInWindow && data && data.flashcardRatings) {
