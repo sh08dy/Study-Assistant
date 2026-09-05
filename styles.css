@@ -2864,3 +2864,15 @@ body.notes-focus-active .workspace {
   color: var(--text);
 }
 
+/* Optimize Touch Latency & GPU Rendering Layers */
+button, .clickable, .time-toggle-btn, .badge {
+  touch-action: manipulation;
+  user-select: none;
+}
+
+/* Promote actively animating or changing cards to GPU layers */
+.pomodoro-timer-card, .progress-ring, .modal-content {
+  will-change: transform, opacity;
+  transform: translateZ(0);
+}
+

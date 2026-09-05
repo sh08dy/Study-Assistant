@@ -402,6 +402,26 @@ function saveUser() {
   saveDb();
 }
 
+let saveTimeout = null;
+function debouncedSaveUser(delay = 400) {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    saveTimeout = null;
+    saveUser();
+  }, delay);
+}
+function flushDebouncedSaveUser() {
+  if (saveTimeout) {
+    clearTimeout(saveTimeout);
+    saveTimeout = null;
+    saveUser();
+  }
+}
+window.debouncedSaveUser = debouncedSaveUser;
+window.flushDebouncedSaveUser = flushDebouncedSaveUser;
+
+window.addEventListener("beforeunload", flushDebouncedSaveUser);
+
 function saveFlashcardDecks() {
   if (!currentUser) return;
   idb.set(`flashcard-decks:${currentUser}`, data.flashcardDecks || {}).catch(err => {
@@ -1777,6 +1797,9 @@ function renderSubjects() {
     ).join("");
   }
 
+  initSubjectListDelegation();
+  const fragment = document.createDocumentFragment();
+
   data.subjects.forEach((subject, index) => {
     const targetMinutes = Number(subject.targetMinutes) > 0 ? Number(subject.targetMinutes) : 120;
     subject.targetMinutes = targetMinutes;
@@ -1802,16 +1825,27 @@ function renderSubjects() {
       </div>
     `;
 
-    const targetBtn = typeof row.querySelector === "function" ? row.querySelector(".target-mins-btn") : null;
-    if (targetBtn) {
-      targetBtn.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        promptChangeSubjectTargetTime(index);
-      });
-    }
+    fragment.appendChild(row);
+  });
 
-    list.append(row);
+  list.appendChild(fragment);
+}
+
+function initSubjectListDelegation() {
+  const list = el("subjectList");
+  if (!list || list.dataset.delegated) return;
+  list.dataset.delegated = "true";
+
+  list.addEventListener("click", (e) => {
+    const targetBtn = e.target.closest(".target-mins-btn");
+    if (targetBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const index = parseInt(targetBtn.getAttribute("data-subject-index"), 10);
+      if (!isNaN(index)) {
+        promptChangeSubjectTargetTime(index);
+      }
+    }
   });
 }
 
@@ -1826,7 +1860,18 @@ function updateSubjectTarget(subjectName, newGoal) {
     saveUser();
   }
 }
-window.updateSubjectTarget = updateSubjectTarget;
+function initStreakGridDelegation() {
+  const weekGrid = el("weekGrid");
+  if (!weekGrid || weekGrid.dataset.delegated) return;
+  weekGrid.dataset.delegated = "true";
+
+  weekGrid.addEventListener("click", (e) => {
+    const cell = e.target.closest(".streak-day");
+    if (!cell || cell.classList.contains("spacer")) return;
+    const dateStr = cell.getAttribute("data-date");
+    // Handled via delegation with zero per-cell listeners
+  });
+}
 
 function renderStreak() {
   checkDayChange();
@@ -1840,6 +1885,8 @@ function renderStreak() {
   const now = new Date();
   const todayStr = getLocalDateString(now);
   
+  initStreakGridDelegation();
+
   if (streakViewMode === "weekly") {
     const day = now.getDay();
     const diff = now.getDate() - day + (day === 0 ? -6 : 1);
@@ -1847,6 +1894,7 @@ function renderStreak() {
     monday.setHours(0, 0, 0, 0);
     
     const weekdayLabels = ["M", "T", "W", "T", "F", "S", "S"];
+    const fragment = document.createDocumentFragment();
     
     for (let i = 0; i < 7; i++) {
       const d = new Date(monday);
@@ -1856,6 +1904,7 @@ function renderStreak() {
       const cell = document.createElement("div");
       cell.className = "streak-day";
       cell.style.cursor = "pointer";
+      cell.setAttribute("data-date", dateStr);
 
       // Map day to logged sessions for hover title details
       const daySessions = (userStudySessions || []).filter(s => getLocalDateString(s.created_at || s.timestamp || s.date) === dateStr);
@@ -1894,8 +1943,9 @@ function renderStreak() {
           cell.innerHTML = `<span>${weekdayLabels[i]}</span>`;
         }
       }
-      weekGrid.append(cell);
+      fragment.appendChild(cell);
     }
+    weekGrid.appendChild(fragment);
     
     let activeDaysCount = 0;
     for (let i = 0; i < 7; i++) {
@@ -1918,11 +1968,13 @@ function renderStreak() {
     let startDay = firstDay.getDay(); // 0 Sunday, 1 Monday, ...
     startDay = startDay === 0 ? 6 : startDay - 1; // convert to Mon=0, Sun=6
     
+    const fragment = document.createDocumentFragment();
+
     // Spacer cells
     for (let i = 0; i < startDay; i++) {
       const spacer = document.createElement("div");
       spacer.className = "streak-day spacer";
-      weekGrid.append(spacer);
+      fragment.appendChild(spacer);
     }
     
     // Day cells
@@ -1936,6 +1988,7 @@ function renderStreak() {
       const cell = document.createElement("div");
       cell.className = "streak-day";
       cell.style.cursor = "pointer";
+      cell.setAttribute("data-date", dateStr);
 
       // Map day to logged sessions for hover title details
       const daySessions = (userStudySessions || []).filter(s => getLocalDateString(s.created_at || s.timestamp || s.date) === dateStr);
@@ -1977,8 +2030,9 @@ function renderStreak() {
           cell.innerHTML = `<span>${dayNum}</span>`;
         }
       }
-      weekGrid.append(cell);
+      fragment.appendChild(cell);
     }
+    weekGrid.appendChild(fragment);
     el("metricDays").textContent = activeDaysCount;
   }
   
@@ -2173,6 +2227,7 @@ function syncTimerOnWake() {
     // Always FORCE PAUSE when waking from a system sleep event
     if (data) {
       data.timerRunning = false;
+      data.timerStartedAt = null;
       resetDocumentTitle();
     }
   }
@@ -2203,15 +2258,14 @@ function startTimerLoop() {
   stopTimerLoop();
   if (data) {
     data.timerLastTick = Date.now();
-    saveUser();
+    debouncedSaveUser(400);
   }
   timerId = window.setInterval(() => {
+    // 1. Lightweight live clock tick only
     try {
-      renderProgress();
       renderLiveClock();
-      renderExamCountdown();
     } catch (err) {
-      console.error("Error in timer header render:", err);
+      console.error("Error in renderLiveClock:", err);
     }
 
     if (!data || !data.timerRunning) {
@@ -2219,12 +2273,7 @@ function startTimerLoop() {
       return;
     }
 
-    try {
-      updateTimerTitle();
-    } catch (err) {
-      console.error("Error updating timer title:", err);
-    }
-    
+    // 2. Process elapsed time during active countdown
     const now = Date.now();
     const elapsedMs = now - data.timerLastTick;
     const elapsedSec = Math.floor(elapsedMs / 1000);
@@ -2249,6 +2298,7 @@ function startTimerLoop() {
       data.timerRemaining = Math.max(0, sessionRemaining - actualElapsed);
       data.timerLastTick = now;
       
+      // Session finished
       if (elapsedSec >= sessionRemaining || data.timerRemaining <= 0) {
         data.timerRemaining = 0;
         const wasAsleepLong = elapsedSec >= maxAllowed || elapsedSec >= (sessionRemaining + 5);
@@ -2261,38 +2311,69 @@ function startTimerLoop() {
         } catch (err) {
           console.error("Error in completeTimerSession:", err);
         }
+        return;
       }
 
+      // 3. FAST PATH: Only update immediate timer DOM elements on the 1-second tick
       try {
-        renderStats();
+        const timerTextEl = el("timerText") || el("timerDisplay");
+        if (timerTextEl) {
+          timerTextEl.textContent = formatTime(data.timerRemaining);
+        }
+        const minEl = el("timerMinutes");
+        if (minEl) {
+          minEl.textContent = String(Math.floor(data.timerRemaining / 60)).padStart(2, "0");
+        }
+        const secEl = el("timerSeconds");
+        if (secEl) {
+          secEl.textContent = String(data.timerRemaining % 60).padStart(2, "0");
+        }
+        const ring = el("timerRing");
+        if (ring) {
+          const max = getTimerDuration(data.timerMode);
+          const elapsed = max - data.timerRemaining;
+          const progress = Math.max(0, Math.min(100, Math.round((elapsed / max) * 100)));
+          ring.style.setProperty("--timer", progress);
+        }
+        updateTimerTitle();
       } catch (err) {
-        console.error("Error in renderStats during timer tick:", err);
+        console.error("Error updating timer DOM:", err);
       }
 
-      try {
-        renderStreak();
-      } catch (err) {
-        console.error("Error in renderStreak during timer tick:", err);
-      }
-
-      try {
-        renderTimer();
-      } catch (err) {
-        console.error("Error in renderTimer during timer tick:", err);
-      }
-
-      saveUser();
+      // Debounced storage write to avoid synchronous JSON clone on every single tick
+      debouncedSaveUser(2000);
     }
   }, 1000);
 }
 
-function stopTimerLoop() {
+function stopTimerLoop(keepTitle = false) {
   if (timerId) {
     window.clearInterval(timerId);
     timerId = null;
   }
-  resetDocumentTitle();
+  if (!keepTitle && (!data || !data.timerRunning)) {
+    resetDocumentTitle();
+  }
 }
+
+function handleVisibilityChange() {
+  if (document.hidden) {
+    if (data && data.timerRunning) {
+      data.timerLastTick = Date.now();
+    }
+    stopTimerLoop(true);
+    flushDebouncedSaveUser();
+  } else {
+    if (data && data.timerRunning) {
+      syncTimerOnWake();
+    }
+    renderLiveClock();
+    updateTimerTitle();
+    startTimerLoop();
+  }
+}
+window.handleVisibilityChange = handleVisibilityChange;
+document.addEventListener("visibilitychange", handleVisibilityChange);
 
 function completeTimerSession(options = {}) {
   playTone("complete");
@@ -2348,17 +2429,22 @@ function completeTimerSession(options = {}) {
   if (shouldAutoStart) {
     data.timerRunning = true;
     data.timerLastTick = Date.now();
+    data.timerStartedAt = Date.now();
     playTone("play");
     updateTimerTitle();
   } else {
     data.timerRunning = false;
+    data.timerStartedAt = null;
     resetDocumentTitle();
   }
 
   saveUser();
   try { renderStats(); } catch (e) { console.error("Error in renderStats:", e); }
+  try { renderStreak(); } catch (e) { console.error("Error in renderStreak:", e); }
   try { renderTimer(); } catch (e) { console.error("Error in renderTimer:", e); }
   try { renderSubjects(); } catch (e) { console.error("Error in renderSubjects:", e); }
+  try { renderExamCountdown(); } catch (e) { console.error("Error in renderExamCountdown:", e); }
+  try { renderProgress(); } catch (e) { console.error("Error in renderProgress:", e); }
   try { if (typeof renderSubjectCoverage === "function") renderSubjectCoverage(); } catch (e) { console.error("Error in renderSubjectCoverage:", e); }
 }
 
@@ -3801,37 +3887,6 @@ async function renderAnalyticsTab() {
     await fetchUserStudySessions();
   }
 
-  // If we have study_sessions loaded from Supabase, sync metrics into data.dailyStudy and data.dailySessions
-  if (userStudySessions && userStudySessions.length > 0) {
-    data.dailyStudy = data.dailyStudy || {};
-    data.dailySessions = data.dailySessions || {};
-
-    const aggregatedDailyStudy = {};
-    const aggregatedDailySessions = {};
-
-    userStudySessions.forEach(s => {
-      const mins = Number(s.duration_minutes || (s.duration_seconds ? s.duration_seconds / 60 : 0) || 0);
-      const dateStr = getLocalDateString(s.created_at || s.timestamp || s.date);
-      if (dateStr && mins > 0 && mins <= 60) {
-        aggregatedDailyStudy[dateStr] = (aggregatedDailyStudy[dateStr] || 0) + (mins * 60);
-        aggregatedDailySessions[dateStr] = (aggregatedDailySessions[dateStr] || 0) + 1;
-      }
-    });
-
-    Object.keys(aggregatedDailyStudy).forEach(d => {
-      data.dailyStudy[d] = Math.max(data.dailyStudy[d] || 0, aggregatedDailyStudy[d]);
-    });
-    Object.keys(aggregatedDailySessions).forEach(d => {
-      data.dailySessions[d] = Math.max(data.dailySessions[d] || 0, aggregatedDailySessions[d]);
-    });
-
-    // Calculate streak from active study dates
-    const { currentStreak } = getStreakData();
-    data.streak = currentStreak;
-    data.bestStreak = Math.max(data.bestStreak || 0, currentStreak);
-    renderStats();
-  }
-
   updateAnalyticsToggleUI();
 
   const N = analyticsRangeDays || 7;
@@ -3845,59 +3900,120 @@ async function renderAnalyticsTab() {
     d.setDate(today.getDate() - i);
     rangeDateStrings.push(getLocalDateString(d));
   }
+  const rangeDateSet = new Set(rangeDateStrings);
 
-  // 1. Calculate overview metrics filtered strictly by the selected range
-  // Total study time sum in range
+  // Single-pass processing: Aggregate daily study/sessions sync, range sessions, and subject distribution simultaneously
+  const aggregatedDailyStudy = {};
+  const aggregatedDailySessions = {};
+  const sessionMinsMap = {};
+  const sessionCountMap = {};
+  const subjectMinsMap = {};
+
+  (userStudySessions || []).forEach(s => {
+    const rawDate = s.created_at || s.timestamp || s.date;
+    const sDate = getLocalDateString(rawDate);
+    if (!sDate) return;
+
+    const mins = Number(s.duration_minutes || (s.duration_seconds ? s.duration_seconds / 60 : 0) || s.duration || 0);
+
+    // Sync accumulator for daily study & sessions
+    if (mins > 0 && mins <= 60) {
+      aggregatedDailyStudy[sDate] = (aggregatedDailyStudy[sDate] || 0) + (mins * 60);
+      aggregatedDailySessions[sDate] = (aggregatedDailySessions[sDate] || 0) + 1;
+    }
+
+    // Active analytics window accumulator
+    const sTime = new Date(rawDate).getTime();
+    if (sTime >= cutoff || rangeDateSet.has(sDate)) {
+      sessionCountMap[sDate] = (sessionCountMap[sDate] || 0) + 1;
+      if (mins > 0) {
+        sessionMinsMap[sDate] = (sessionMinsMap[sDate] || 0) + mins;
+      }
+      const subj = s.subject || "General";
+      subjectMinsMap[subj] = (subjectMinsMap[subj] || 0) + (mins > 0 ? mins : 1);
+    }
+  });
+
+  // Sync Supabase sessions into local data state if available
+  if (userStudySessions && userStudySessions.length > 0) {
+    data.dailyStudy = data.dailyStudy || {};
+    data.dailySessions = data.dailySessions || {};
+
+    Object.keys(aggregatedDailyStudy).forEach(d => {
+      data.dailyStudy[d] = Math.max(data.dailyStudy[d] || 0, aggregatedDailyStudy[d]);
+    });
+    Object.keys(aggregatedDailySessions).forEach(d => {
+      data.dailySessions[d] = Math.max(data.dailySessions[d] || 0, aggregatedDailySessions[d]);
+    });
+
+    const { currentStreak } = getStreakData();
+    data.streak = currentStreak;
+    data.bestStreak = Math.max(data.bestStreak || 0, currentStreak);
+    renderStats();
+  }
+
+  // Flashcards reviews aggregation
+  const ratingsMap = { again: 0, hard: 0, good: 0, easy: 0 };
+  let rangeReviewsCount = 0;
+  let hasReviewsInWindow = false;
+
+  if (Array.isArray(data.flashcardReviews) && data.flashcardReviews.length > 0) {
+    data.flashcardReviews.forEach(r => {
+      const rTime = r.timestamp || (r.date ? new Date(r.date).getTime() : 0);
+      const rDate = getLocalDateString(rTime);
+      if (rTime >= cutoff || rangeDateSet.has(rDate)) {
+        rangeReviewsCount++;
+        const rating = (r.rating || "").toLowerCase();
+        if (ratingsMap[rating] !== undefined) {
+          ratingsMap[rating]++;
+          hasReviewsInWindow = true;
+        }
+      }
+    });
+  const useDailyFlashcardsFallback = (!Array.isArray(data.flashcardReviews) || data.flashcardReviews.length === 0) && !!(data && data.dailyFlashcards);
+
+  if (!hasReviewsInWindow && data && data.flashcardRatings) {
+    ratingsMap.again = data.flashcardRatings.again || 0;
+    ratingsMap.hard = data.flashcardRatings.hard || 0;
+    ratingsMap.good = data.flashcardRatings.good || 0;
+    ratingsMap.easy = data.flashcardRatings.easy || 0;
+  }
+
+  // Single-pass calculation for overview metrics, review fallback, and consistency ratio
   let rangeStudySeconds = 0;
+  let rangeSessionsCount = 0;
+  let activeDaysInRange = 0;
+
   rangeDateStrings.forEach(d => {
     const dailySecs = (data && data.dailyStudy && Number(data.dailyStudy[d])) || 0;
-    const sessSecs = (userStudySessions || [])
-      .filter(s => getLocalDateString(s.created_at || s.timestamp || s.date) === d)
-      .reduce((acc, s) => acc + (Number(s.duration_minutes || (s.duration_seconds ? s.duration_seconds / 60 : 0) || s.duration || 0) * 60), 0);
-    rangeStudySeconds += Math.max(dailySecs, sessSecs);
+    const sessSecs = (sessionMinsMap[d] || 0) * 60;
+    const bestSecs = Math.max(dailySecs, sessSecs);
+    rangeStudySeconds += bestSecs;
+
+    const dailySess = (data && data.dailySessions && Number(data.dailySessions[d])) || 0;
+    const sessCount = sessionCountMap[d] || 0;
+    rangeSessionsCount += Math.max(dailySess, sessCount);
+
+    if (bestSecs > 0) {
+      activeDaysInRange++;
+    }
+
+    if (useDailyFlashcardsFallback) {
+      rangeReviewsCount += Number(data.dailyFlashcards[d]) || 0;
+    }
   });
+
+  if (useDailyFlashcardsFallback && rangeReviewsCount === 0 && (data.flashcardsToday || 0) > 0) {
+    rangeReviewsCount = data.flashcardsToday;
+  }
+
   const totalHrs = Math.floor(rangeStudySeconds / 3600);
   const totalMins = Math.floor((rangeStudySeconds % 3600) / 60);
   el("analyticTotalHours").textContent = `${totalHrs}h ${totalMins}m`;
 
-  // Flashcards reviews in range
-  let rangeReviewsCount = 0;
-  if (Array.isArray(data.flashcardReviews) && data.flashcardReviews.length > 0) {
-    rangeReviewsCount = data.flashcardReviews.filter(r => {
-      const rTime = r.timestamp || (r.date ? new Date(r.date).getTime() : 0);
-      return rTime >= cutoff || rangeDateStrings.includes(getLocalDateString(rTime));
-    }).length;
-  } else if (data && data.dailyFlashcards) {
-    rangeDateStrings.forEach(d => {
-      rangeReviewsCount += Number(data.dailyFlashcards[d]) || 0;
-    });
-    if (rangeReviewsCount === 0 && (data.flashcardsToday || 0) > 0) {
-      rangeReviewsCount = data.flashcardsToday;
-    }
-  }
   el("analyticTotalCards").textContent = rangeReviewsCount.toLocaleString();
-
-  // Focus sessions completed in range
-  let rangeSessionsCount = 0;
-  rangeDateStrings.forEach(d => {
-    const dailySess = (data && data.dailySessions && Number(data.dailySessions[d])) || 0;
-    const sessCount = (userStudySessions || [])
-      .filter(s => getLocalDateString(s.created_at || s.timestamp || s.date) === d)
-      .length;
-    rangeSessionsCount += Math.max(dailySess, sessCount);
-  });
   el("analyticTotalSessions").textContent = rangeSessionsCount.toLocaleString();
 
-  // Consistency Ratio: Number of days with active study sessions in the last N days divided by N
-  const activeDaysInRange = rangeDateStrings.filter(d => {
-    const dailySecs = (data && data.dailyStudy && Number(data.dailyStudy[d])) || 0;
-    const hasSess = (userStudySessions || []).some(s => {
-      const dateStr = getLocalDateString(s.created_at || s.timestamp || s.date);
-      const mins = Number(s.duration_minutes || s.duration || 0);
-      return dateStr === d && mins > 0;
-    });
-    return dailySecs > 0 || hasSess;
-  }).length;
   const consistencyPercent = Math.round((activeDaysInRange / N) * 100);
   el("analyticConsistency").textContent = `${consistencyPercent}%`;
   const consistencySub = el("analyticConsistencySub");
@@ -3906,23 +4022,51 @@ async function renderAnalyticsTab() {
   }
 
   // 2. Render SVG Line Chart (Study Hours Trend - Last N Days)
-  renderStudyHoursTrend();
+  renderStudyHoursTrend(rangeDateStrings, sessionMinsMap);
 
   // 3. Render SVG Donut Chart (Anki Review Quality Breakdown - Last N Days)
-  renderAnkiRatingsDonut();
+  renderAnkiRatingsDonut(ratingsMap);
 
   // 4. Render SVG Bar Chart (Daily Focus Sessions completed - Last N Days)
-  renderSessionsBarChart();
+  renderSessionsBarChart(rangeDateStrings, sessionCountMap);
 
   // 5. Render Study Frequency Heatmap
   renderActivityHeatmap();
 
   // 5.5. Render Subject Tag Study Distribution
-  renderSubjectStudyDistribution();
+  renderSubjectStudyDistribution(subjectMinsMap);
 
   // 6. Validate & Unlock Achievements
   checkAchievements(rangeStudySeconds, rangeReviewsCount, activeDaysInRange);
 }
+
+function switchAnalyticsRange(range) {
+  analyticsRangeDays = Number(range) || 7;
+  if (data) {
+    data.analyticsRangeDays = analyticsRangeDays;
+    debouncedSaveUser(400);
+  }
+  // Immediate button active state toggle & text updates
+  document.querySelectorAll('.analytics-time-toggle .time-toggle-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.range === String(analyticsRangeDays));
+  });
+  const sub = el("analyticsRangeSubtitle");
+  if (sub) sub.textContent = `Metrics and trends for the last ${analyticsRangeDays} days`;
+  const kicker = el("studyHoursTrendKicker");
+  if (kicker) kicker.textContent = `Study Hours Trend (Last ${analyticsRangeDays} Days)`;
+  const hoursSub = el("analyticTotalHoursSub");
+  if (hoursSub) hoursSub.textContent = `Last ${analyticsRangeDays} days logged focus`;
+  const cardsSub = el("analyticTotalCardsSub");
+  if (cardsSub) cardsSub.textContent = `Last ${analyticsRangeDays} days review activity`;
+  const sessSub = el("analyticTotalSessionsSub");
+  if (sessSub) sessSub.textContent = `Last ${analyticsRangeDays} days completed blocks`;
+
+  // Defer heavy chart recalculation to next painting frame
+  requestAnimationFrame(() => {
+    renderAnalyticsTab();
+  });
+}
+window.switchAnalyticsRange = switchAnalyticsRange;
 
 function updateAnalyticsToggleUI() {
   const btns = document.querySelectorAll(".analytics-time-toggle .time-toggle-btn");
@@ -3953,27 +4097,29 @@ function updateAnalyticsToggleUI() {
 }
 window.updateAnalyticsToggleUI = updateAnalyticsToggleUI;
 
-function renderStudyHoursTrend() {
+function renderStudyHoursTrend(rangeDates, precomputedMinsMap) {
   const container = el("studyHoursChartContainer");
   if (!container) return;
 
-  const points = [];
-  const labels = [];
-  const now = new Date();
   const N = analyticsRangeDays || 7;
-  
+  const points = [];
+  const dateObjs = [];
+  const now = new Date();
+
   for (let i = N - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(now.getDate() - i);
     const dateStr = getLocalDateString(d);
     const dailySecs = (data.dailyStudy && Number(data.dailyStudy[dateStr])) || 0;
-    const sessSecs = (userStudySessions || [])
-      .filter(s => getLocalDateString(s.created_at || s.timestamp || s.date) === dateStr)
-      .reduce((acc, s) => acc + (Number(s.duration_minutes || (s.duration_seconds ? s.duration_seconds / 60 : 0) || s.duration || 0) * 60), 0);
+    const sessSecs = precomputedMinsMap
+      ? ((precomputedMinsMap[dateStr] || 0) * 60)
+      : (userStudySessions || [])
+          .filter(s => getLocalDateString(s.created_at || s.timestamp || s.date) === dateStr)
+          .reduce((acc, s) => acc + (Number(s.duration_minutes || (s.duration_seconds ? s.duration_seconds / 60 : 0) || s.duration || 0) * 60), 0);
     const seconds = Math.max(dailySecs, sessSecs);
     const hours = Number((seconds / 3600).toFixed(2));
     points.push(hours);
-    labels.push(d);
+    dateObjs.push(d);
   }
 
   const maxVal = Math.max(2, ...points);
@@ -4021,7 +4167,7 @@ function renderStudyHoursTrend() {
 
   let xLabels = "";
   const step = N <= 7 ? 1 : Math.ceil(N / 6);
-  labels.forEach((d, i) => {
+  dateObjs.forEach((d, i) => {
     if (i % step === 0 || i === N - 1) {
       const x = paddingLeft + (i / Math.max(1, N - 1)) * chartWidth;
       const text = N <= 7
@@ -4036,7 +4182,7 @@ function renderStudyHoursTrend() {
   const ptRadius = N <= 7 ? 4 : 2.5;
   let dataPoints = "";
   mappedPoints.forEach((pt, i) => {
-    const dStr = getLocalDateString(labels[i]);
+    const dStr = getLocalDateString(dateObjs[i]);
     dataPoints += `
       <circle cx="${pt.x}" cy="${pt.y}" r="${ptRadius}" class="chart-point" data-tooltip="${dStr}: ${points[i]} hrs" />
     `;
@@ -4064,42 +4210,35 @@ function renderStudyHoursTrend() {
   `;
 }
 
-function renderAnkiRatingsDonut() {
+function renderAnkiRatingsDonut(precomputedRatings) {
   const container = el("ankiRatingsChartContainer");
   if (!container) return;
 
   const N = analyticsRangeDays || 7;
-  const cutoff = Date.now() - (N * 24 * 60 * 60 * 1000);
-  const rangeDateStrings = [];
-  const now = new Date();
-  for (let i = N - 1; i >= 0; i--) {
-    const d = new Date(now);
-    d.setDate(now.getDate() - i);
-    rangeDateStrings.push(getLocalDateString(d));
-  }
+  let ratings = precomputedRatings;
 
-  const ratings = { again: 0, hard: 0, good: 0, easy: 0 };
-  let hasReviewsInWindow = false;
-
-  if (Array.isArray(data.flashcardReviews) && data.flashcardReviews.length > 0) {
-    data.flashcardReviews.forEach(r => {
-      const rTime = r.timestamp || (r.date ? new Date(r.date).getTime() : 0);
-      const rDate = getLocalDateString(rTime);
-      if (rTime >= cutoff || rangeDateStrings.includes(rDate)) {
-        const rating = (r.rating || "").toLowerCase();
-        if (ratings[rating] !== undefined) {
-          ratings[rating]++;
-          hasReviewsInWindow = true;
+  if (!ratings) {
+    ratings = { again: 0, hard: 0, good: 0, easy: 0 };
+    const cutoff = Date.now() - (N * 24 * 60 * 60 * 1000);
+    let hasReviews = false;
+    if (Array.isArray(data.flashcardReviews) && data.flashcardReviews.length > 0) {
+      data.flashcardReviews.forEach(r => {
+        const rTime = r.timestamp || (r.date ? new Date(r.date).getTime() : 0);
+        if (rTime >= cutoff) {
+          const rating = (r.rating || "").toLowerCase();
+          if (ratings[rating] !== undefined) {
+            ratings[rating]++;
+            hasReviews = true;
+          }
         }
-      }
-    });
-  }
-
-  if (!hasReviewsInWindow && data.flashcardRatings) {
-    ratings.again = data.flashcardRatings.again || 0;
-    ratings.hard = data.flashcardRatings.hard || 0;
-    ratings.good = data.flashcardRatings.good || 0;
-    ratings.easy = data.flashcardRatings.easy || 0;
+      });
+    }
+    if (!hasReviews && data.flashcardRatings) {
+      ratings.again = data.flashcardRatings.again || 0;
+      ratings.hard = data.flashcardRatings.hard || 0;
+      ratings.good = data.flashcardRatings.good || 0;
+      ratings.easy = data.flashcardRatings.easy || 0;
+    }
   }
 
   const easy = ratings.easy || 0;
@@ -4176,25 +4315,27 @@ function renderAnkiRatingsDonut() {
   `;
 }
 
-function renderSessionsBarChart() {
+function renderSessionsBarChart(rangeDates, precomputedCountsMap) {
   const container = el("sessionsBarChartContainer");
   if (!container) return;
 
-  const points = [];
-  const labels = [];
-  const now = new Date();
   const N = analyticsRangeDays || 7;
+  const points = [];
+  const dateObjs = [];
+  const now = new Date();
 
   for (let i = N - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(now.getDate() - i);
     const dateStr = getLocalDateString(d);
     const dailySessions = (data.dailySessions && Number(data.dailySessions[dateStr])) || 0;
-    const sessCount = (userStudySessions || [])
-      .filter(s => getLocalDateString(s.created_at || s.timestamp || s.date) === dateStr)
-      .length;
+    const sessCount = precomputedCountsMap
+      ? (precomputedCountsMap[dateStr] || 0)
+      : (userStudySessions || [])
+          .filter(s => getLocalDateString(s.created_at || s.timestamp || s.date) === dateStr)
+          .length;
     points.push(Math.max(dailySessions, sessCount));
-    labels.push(d);
+    dateObjs.push(d);
   }
 
   const maxVal = Math.max(4, ...points);
@@ -4226,7 +4367,7 @@ function renderSessionsBarChart() {
     const x = paddingLeft + i * barSlotWidth + (barSlotWidth - barWidth) / 2;
     const barHeight = (val / maxVal) * chartHeight;
     const y = paddingTop + chartHeight - barHeight;
-    const dStr = getLocalDateString(labels[i]);
+    const dStr = getLocalDateString(dateObjs[i]);
 
     barsHtml += `
       <rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="${N <= 7 ? 3 : 1.5}" class="chart-bar" data-tooltip="${dStr}: ${val} sessions" />
@@ -4235,7 +4376,7 @@ function renderSessionsBarChart() {
 
   let xLabels = "";
   const step = N <= 7 ? 1 : Math.ceil(N / 6);
-  labels.forEach((d, i) => {
+  dateObjs.forEach((d, i) => {
     if (i % step === 0 || i === N - 1) {
       const x = paddingLeft + i * barSlotWidth + barSlotWidth / 2;
       const text = N <= 7
@@ -4264,6 +4405,7 @@ function renderActivityHeatmap() {
   if (!container) return;
   container.innerHTML = "";
 
+  const fragment = document.createDocumentFragment();
   const now = new Date();
   for (let i = 27; i >= 0; i--) {
     const d = new Date(now);
@@ -4289,8 +4431,9 @@ function renderActivityHeatmap() {
     cell.className = "heatmap-cell";
     cell.style.cssText = depthStyle;
     cell.setAttribute("data-tooltip", tooltipText);
-    container.append(cell);
+    fragment.appendChild(cell);
   }
+  container.appendChild(fragment);
 }
 
 function checkAchievements(totalSeconds, totalReviews, activeDays) {
@@ -4312,27 +4455,23 @@ function checkAchievements(totalSeconds, totalReviews, activeDays) {
   toggleBadge("badgeStreakMaster", isStreakMaster);
 }
 
-function renderSubjectStudyDistribution() {
+function renderSubjectStudyDistribution(precomputedSubjectMins) {
   const container = el("subjectAnalyticsChartContainer");
   if (!container) return;
 
-  const N = analyticsRangeDays || 7;
-  const cutoff = Date.now() - (N * 24 * 60 * 60 * 1000);
-  const rangeDateStrings = [];
-  const now = new Date();
-  for (let i = N - 1; i >= 0; i--) {
-    const d = new Date(now);
-    d.setDate(now.getDate() - i);
-    rangeDateStrings.push(getLocalDateString(d));
-  }
-
   const subjects = {};
 
-  if (userStudySessions && userStudySessions.length > 0) {
+  if (precomputedSubjectMins && Object.keys(precomputedSubjectMins).length > 0) {
+    Object.keys(precomputedSubjectMins).forEach(k => {
+      subjects[k] = precomputedSubjectMins[k];
+    });
+  } else if (userStudySessions && userStudySessions.length > 0) {
+    const N = analyticsRangeDays || 7;
+    const cutoff = Date.now() - (N * 24 * 60 * 60 * 1000);
     userStudySessions.forEach(s => {
       const sDate = getLocalDateString(s.created_at || s.timestamp || s.date);
       const sTime = new Date(s.created_at || s.timestamp || s.date).getTime();
-      if (sTime >= cutoff || rangeDateStrings.includes(sDate)) {
+      if (sTime >= cutoff) {
         const subj = s.subject || "General";
         const mins = Number(s.duration_minutes || (s.duration_seconds ? s.duration_seconds / 60 : 0) || s.duration || 0);
         subjects[subj] = (subjects[subj] || 0) + (mins > 0 ? mins : 1);
@@ -5845,9 +5984,55 @@ function renderFlashcardsTab() {
   }
 }
 
+function initDeckListDelegation() {
+  const listContainer = el("deckList");
+  if (!listContainer || listContainer.dataset.delegated) return;
+  listContainer.dataset.delegated = "true";
+
+  listContainer.addEventListener("click", async (e) => {
+    const deleteBtn = e.target.closest(".delete-deck-btn-tree");
+    if (deleteBtn) {
+      e.stopPropagation();
+      const deckName = deleteBtn.getAttribute("data-deck");
+      if (deckName) {
+        const confirmed = await showAppConfirm(`Are you sure you want to delete "${deckName}" (including all subdecks)?`, "Delete Deck", "Delete", "Cancel");
+        if (confirmed) {
+          deleteDeckAndSubdecks(deckName);
+        }
+      }
+      return;
+    }
+
+    const startBtn = e.target.closest(".start-deck-btn-tree");
+    if (startBtn) {
+      e.stopPropagation();
+      const deckName = startBtn.getAttribute("data-deck");
+      if (deckName) {
+        startStudySession(deckName);
+      }
+      return;
+    }
+
+    const header = e.target.closest(".deck-item-header-tree");
+    if (header && !e.target.closest("button")) {
+      const isLeaf = header.getAttribute("data-is-leaf") === "true";
+      const deckName = header.getAttribute("data-deck");
+      if (!isLeaf && deckName) {
+        if (collapsedDecks.has(deckName)) {
+          collapsedDecks.delete(deckName);
+        } else {
+          collapsedDecks.add(deckName);
+        }
+        renderDeckList();
+      }
+    }
+  });
+}
+
 function renderDeckList() {
   const listContainer = el("deckList");
   listContainer.innerHTML = "";
+  initDeckListDelegation();
   
   const decks = data.flashcardDecks || {};
   const deckNames = Object.keys(decks);
@@ -5864,10 +6049,12 @@ function renderDeckList() {
   deckNames.sort();
   const rootNode = buildDeckTree(deckNames, decks);
   
+  const fragment = document.createDocumentFragment();
   const childrenNames = Object.keys(rootNode.children);
   childrenNames.forEach(childName => {
-    listContainer.appendChild(renderTreeNode(rootNode.children[childName], 0));
+    fragment.appendChild(renderTreeNode(rootNode.children[childName], 0));
   });
+  listContainer.appendChild(fragment);
 }
 
 function renderTreeNode(node, depth = 0) {
@@ -5903,6 +6090,7 @@ function renderTreeNode(node, depth = 0) {
   const header = document.createElement("div");
   header.className = `deck-item-header-tree ${currentStudyDeck === node.fullName ? "active" : ""}`;
   header.setAttribute("data-deck", node.fullName);
+  header.setAttribute("data-is-leaf", String(isLeaf));
   
   header.innerHTML = `
     <div class="deck-title-row">
@@ -5918,45 +6106,16 @@ function renderTreeNode(node, depth = 0) {
     </div>
   `;
   
-  header.addEventListener("click", (e) => {
-    if (e.target.closest("button")) return;
-    if (!isLeaf) {
-      if (collapsedDecks.has(node.fullName)) {
-        collapsedDecks.delete(node.fullName);
-      } else {
-        collapsedDecks.add(node.fullName);
-      }
-      renderDeckList();
-    }
-  });
-  
-  const startBtn = header.querySelector(".start-deck-btn-tree");
-  if (startBtn) {
-    startBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      startStudySession(node.fullName);
-    });
-  }
-  
-  const deleteBtn = header.querySelector(".delete-deck-btn-tree");
-  if (deleteBtn) {
-    deleteBtn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      const confirmed = await showAppConfirm(`Are you sure you want to delete "${node.fullName}" (including all subdecks)?`, "Delete Deck", "Delete", "Cancel");
-      if (confirmed) {
-        deleteDeckAndSubdecks(node.fullName);
-      }
-    });
-  }
-  
   container.appendChild(header);
   
   if (!isLeaf && !isCollapsed) {
     const childrenContainer = document.createElement("div");
     childrenContainer.className = "deck-tree-children";
+    const childFragment = document.createDocumentFragment();
     childrenNames.forEach(childName => {
-      childrenContainer.appendChild(renderTreeNode(node.children[childName], depth + 1));
+      childFragment.appendChild(renderTreeNode(node.children[childName], depth + 1));
     });
+    childrenContainer.appendChild(childFragment);
     container.appendChild(childrenContainer);
   }
   
@@ -6008,7 +6167,48 @@ function startStudySession(deckName) {
   renderActiveCard();
 }
 
+function initStudyViewDelegation() {
+  const container = el("studyViewContainer");
+  if (!container || container.dataset.delegated) return;
+  container.dataset.delegated = "true";
+
+  container.addEventListener("click", (e) => {
+    const restartBtn = e.target.closest("#restartDeckBtn");
+    if (restartBtn) {
+      startStudySession(currentStudyDeck);
+      return;
+    }
+
+    const rateBtn = e.target.closest("[data-rating]");
+    if (rateBtn) {
+      e.stopPropagation();
+      const rating = rateBtn.getAttribute("data-rating");
+      if (rating) rateCard(rating);
+      return;
+    }
+
+    const showBtn = e.target.closest("#showAnswerBtn");
+    if (showBtn) {
+      e.stopPropagation();
+      cardFlipped = true;
+      const inner = el("flashcardInner");
+      if (inner) inner.classList.add("flipped");
+      renderCardActions();
+      return;
+    }
+
+    const cardContainer = e.target.closest("#flashcardContainer");
+    if (cardContainer && !e.target.closest("#cardActions") && !e.target.closest("button")) {
+      cardFlipped = !cardFlipped;
+      const inner = el("flashcardInner");
+      if (inner) inner.classList.toggle("flipped", cardFlipped);
+      renderCardActions();
+    }
+  });
+}
+
 function renderActiveCard() {
+  initStudyViewDelegation();
   const container = el("studyViewContainer");
   el("studyKicker").textContent = `Deck: ${currentStudyDeck}`;
   
@@ -6021,10 +6221,6 @@ function renderActiveCard() {
         <button type="button" class="primary-action" id="restartDeckBtn" style="margin-top: 10px;">Review Again</button>
       </div>
     `;
-    
-    el("restartDeckBtn").addEventListener("click", () => {
-      startStudySession(currentStudyDeck);
-    });
     return;
   }
   
@@ -6074,14 +6270,6 @@ function renderActiveCard() {
     </div>
   `;
   
-  const cardContainer = el("flashcardContainer");
-  cardContainer.addEventListener("click", () => {
-    cardFlipped = !cardFlipped;
-    const inner = el("flashcardInner");
-    inner.classList.toggle("flipped", cardFlipped);
-    renderCardActions();
-  });
-  
   renderCardActions();
 }
 
@@ -6098,29 +6286,10 @@ function renderCardActions() {
         <button type="button" data-rating="easy" id="rateEasyBtn"><span class="key-hint">4</span> Easy</button>
       </div>
     `;
-    
-    const againBtn = el("rateAgainBtn");
-    if (againBtn) againBtn.addEventListener("click", (e) => { e.stopPropagation(); rateCard("again"); });
-    const hardBtn = el("rateHardBtn");
-    if (hardBtn) hardBtn.addEventListener("click", (e) => { e.stopPropagation(); rateCard("hard"); });
-    const goodBtn = el("rateGoodBtn");
-    if (goodBtn) goodBtn.addEventListener("click", (e) => { e.stopPropagation(); rateCard("good"); });
-    const easyBtn = el("rateEasyBtn");
-    if (easyBtn) easyBtn.addEventListener("click", (e) => { e.stopPropagation(); rateCard("easy"); });
   } else {
     actionsContainer.innerHTML = `
       <button type="button" class="show-answer-btn" id="showAnswerBtn"><span class="key-hint">Space / Enter</span> Show Answer</button>
     `;
-    
-    const showBtn = el("showAnswerBtn");
-    if (showBtn) {
-      showBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        cardFlipped = true;
-        el("flashcardInner").classList.add("flipped");
-        renderCardActions();
-      });
-    }
   }
 }
 
@@ -6173,7 +6342,7 @@ function rateCard(rating) {
   data.dailyFlashcards = data.dailyFlashcards || {};
   data.dailyFlashcards[todayStr] = data.flashcardsToday;
   
-  saveUser();
+  debouncedSaveUser(400);
   
   currentCardIndex++;
   cardFlipped = false;
@@ -6298,13 +6467,7 @@ function bindEvents() {
   analyticsTimeBtns.forEach(btn => {
     btn.addEventListener("click", () => {
       const range = parseInt(btn.getAttribute("data-range"), 10) || 7;
-      analyticsRangeDays = range;
-      if (data) {
-        data.analyticsRangeDays = range;
-        saveUser();
-      }
-      updateAnalyticsToggleUI();
-      renderAnalyticsTab();
+      switchAnalyticsRange(range);
     });
   });
 
@@ -6525,6 +6688,7 @@ function bindEvents() {
     data.timerRunning = !data.timerRunning;
     if (data.timerRunning) {
       data.timerLastTick = Date.now();
+      data.timerStartedAt = data.timerStartedAt || Date.now();
       playTone("play");
       updateTimerTitle();
     } else {
@@ -6537,6 +6701,7 @@ function bindEvents() {
   el("resetTimer").addEventListener("click", () => {
     data.timerRemaining = getTimerDuration(data.timerMode);
     data.timerRunning = false;
+    data.timerStartedAt = null;
     resetDocumentTitle();
     saveUser();
     renderTimer();
@@ -6697,12 +6862,6 @@ function bindEvents() {
     el("monthlyButton").classList.add("active");
     el("weeklyButton").classList.remove("active");
     renderStreak();
-  });
-
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") {
-      syncTimerOnWake();
-    }
   });
 
   el("taskList").addEventListener("change", async (event) => {
