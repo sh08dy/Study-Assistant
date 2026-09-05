@@ -937,7 +937,9 @@ function renderSharedResourcesTab() {
       if (!fileUrl) return;
       try {
         switchTab("Flashcards");
-        const response = await fetch(fileUrl);
+        // Use proxy for external URLs to avoid CORS issues
+        const fetchUrl = fileUrl.startsWith("/") ? fileUrl : `/api/proxy-download?url=${encodeURIComponent(fileUrl)}`;
+        const response = await fetch(fetchUrl);
         if (!response.ok) throw new Error("Network response was not ok.");
         const arrayBuffer = await response.arrayBuffer();
         
@@ -2658,14 +2660,18 @@ async function importAnkiFromWebLink() {
       </div>
     `;
 
-    const response = await fetch(resolvedUrl);
+    // Route through server-side proxy to bypass CORS restrictions
+    const proxyUrl = `/api/proxy-download?url=${encodeURIComponent(resolvedUrl)}`;
+    const response = await fetch(proxyUrl);
+
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const errorText = await response.text().catch(() => response.statusText);
+      throw new Error(`Download failed (${response.status}): ${errorText}`);
     }
 
     const contentType = response.headers.get("content-type") || "";
     if (contentType.includes("text/html")) {
-      throw new Error("CORS_OR_HTML");
+      throw new Error("NEEDS_SHARE_PERMISSION");
     }
 
     const arrayBuffer = await response.arrayBuffer();
@@ -2678,10 +2684,10 @@ async function importAnkiFromWebLink() {
     showAppAlert("Deck imported successfully from URL!", "Success");
   } catch (err) {
     console.error("Web link import failed:", err);
-    if (err.message === "CORS_OR_HTML" || err.message.includes("Failed to fetch") || err.message.includes("NetworkError") || err.message.includes("CORS")) {
+    if (err.message === "NEEDS_SHARE_PERMISSION" || err.message.includes("Failed to fetch")) {
       showAppAlert(
-        "Could not download the file directly.\n\nIf using Google Drive, make sure the file is shared as \"Anyone with the link can view\".\n\nAlternatively, download the .apkg file to your device first, then use the \"Import .apkg file\" button.",
-        "Download Blocked (CORS)"
+        "Could not download the file.\n\nIf using Google Drive, ensure the file sharing is set to \"Anyone with the link can view\".\n\nAlternatively, download the .apkg file to your device first, then use the \"Import .apkg file\" button.",
+        "Download Failed"
       );
     } else {
       showAppAlert(`Import failed: ${err.message}`, "Import Error");
