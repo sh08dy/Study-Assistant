@@ -745,7 +745,7 @@ async function logStudySession(durationMinutes, subject = "General", sessionType
     const payload = {
       user_id: currentSupabaseUser.id,
       subject: subject || "General",
-      duration_minutes: Math.max(1, Math.round(Number(durationMinutes) || 25)),
+      duration_minutes: Math.min(180, Math.max(1, Math.round(Number(durationMinutes) || 25))),
       session_type: sessionType || "focus"
     };
 
@@ -761,6 +761,7 @@ async function logStudySession(durationMinutes, subject = "General", sessionType
 
     if (inserted && inserted.length > 0) {
       userStudySessions.push(inserted[0]);
+      if (typeof loadUserData === "function") loadUserData();
       if (typeof renderSubjects === "function") renderSubjects();
     }
     return inserted?.[0] || null;
@@ -770,9 +771,73 @@ async function logStudySession(durationMinutes, subject = "General", sessionType
   }
 }
 
+function loadUserData() {
+  if (!data) return;
+
+  // 1. Filter userStudySessions and prune or cap any single session where duration_minutes > 180 (or duration_seconds > 10800)
+  if (Array.isArray(userStudySessions) && userStudySessions.length > 0) {
+    userStudySessions.forEach(s => {
+      const durMins = Number(s.duration_minutes || (s.duration_seconds ? s.duration_seconds / 60 : 0) || (s.duration || 0));
+      if (durMins > 180) {
+        console.warn(`[Sanitize] Capping bloated study session (${durMins}m) to 180m:`, s);
+        s.duration_minutes = 180;
+        if (s.duration_seconds) s.duration_seconds = 180 * 60;
+        if (s.duration) s.duration = 180;
+        if (supabaseClient && currentSupabaseUser && s.id) {
+          supabaseClient.from("study_sessions").update({ duration_minutes: 180 }).eq("id", s.id).then();
+        }
+      }
+    });
+  }
+
+  // 2. Recalculate today's study time cleanly from the sanitized session array
+  const todayStr = getLocalDateString(new Date());
+  const todaySessions = (userStudySessions || []).filter(s => {
+    const sDate = getLocalDateString(s.created_at || s.timestamp || s.date);
+    return sDate === todayStr;
+  });
+  const recalculatedTodaySecs = todaySessions.reduce((acc, s) => {
+    return acc + (Number(s.duration_minutes || s.duration || 0) * 60);
+  }, 0);
+
+  // 3. Reset data.studySeconds if it exceeds total daily realistic hours (> 16 hours = 57,600s) or bloated drift
+  const maxDailySeconds = 16 * 3600;
+  if ((data.studySeconds || 0) > maxDailySeconds || (data.studySeconds || 0) > (recalculatedTodaySecs + 3600)) {
+    console.warn(`[Sanitize] Resetting bloated studySeconds (${data.studySeconds}s) to clean total ${recalculatedTodaySecs}s`);
+    data.studySeconds = recalculatedTodaySecs;
+  }
+
+  data.dailyStudy = data.dailyStudy || {};
+  if ((data.dailyStudy[todayStr] || 0) > maxDailySeconds || (data.dailyStudy[todayStr] || 0) > (recalculatedTodaySecs + 3600)) {
+    data.dailyStudy[todayStr] = recalculatedTodaySecs;
+  }
+
+  // Check historical dates in data.dailyStudy for values exceeding 16 hours
+  Object.keys(data.dailyStudy).forEach(d => {
+    if (data.dailyStudy[d] > maxDailySeconds) {
+      const daySessions = (userStudySessions || []).filter(s => getLocalDateString(s.created_at || s.timestamp || s.date) === d);
+      const daySecs = daySessions.reduce((acc, s) => acc + (Number(s.duration_minutes || s.duration || 0) * 60), 0);
+      data.dailyStudy[d] = Math.min(daySecs, maxDailySeconds);
+    }
+  });
+
+  // Re-sync subjects studied minutes from sanitized sessions
+  if (Array.isArray(data.subjects)) {
+    data.subjects.forEach(s => {
+      if (typeof getSubjectStudiedMinutes === "function") {
+        s.studiedMinutes = getSubjectStudiedMinutes(s.name);
+      }
+    });
+  }
+
+  saveUser();
+}
+window.loadUserData = loadUserData;
+
 async function fetchUserStudySessions() {
   if (!supabaseClient || !currentSupabaseUser) {
     userStudySessions = [];
+    if (typeof loadUserData === "function") loadUserData();
     if (typeof renderSubjects === "function") renderSubjects();
     return [];
   }
@@ -790,6 +855,7 @@ async function fetchUserStudySessions() {
     }
 
     userStudySessions = rows || [];
+    loadUserData();
     if (typeof renderSubjects === "function") renderSubjects();
     return userStudySessions;
   } catch (err) {
@@ -1211,6 +1277,7 @@ async function login(email, supabaseUser = null) {
   }
 
   data = normalizeData(db.users[email].data || defaultData());
+  loadUserData();
   
   try {
     data.flashcardDecks = await idb.get(`flashcard-decks:${email}`) || {};
@@ -1258,6 +1325,8 @@ async function login(email, supabaseUser = null) {
         fetchUserEvents(),
         fetchUserStudySessions()
       ]);
+      loadUserData();
+      renderAll();
       setupSupabaseRealtime(currentSupabaseUser.id);
     }
     fetchSharedResources();
@@ -1419,12 +1488,12 @@ function renderExamCountdown() {
   const subjects = (data && Array.isArray(data.subjects)) ? data.subjects : [];
   const remainingHours = (subjects || []).reduce((acc, s) => {
     const target = Number(s.targetMinutes || 120);
-    const studied = typeof getSubjectStudiedMinutes === "function" ? getSubjectStudiedMinutes(s.name) : Number(s.studiedMinutes || 0);
+    const studied = Number((typeof getSubjectStudiedMinutes === "function" ? getSubjectStudiedMinutes(s.name) : s.studiedMinutes) || s.studiedMinutes || 0);
     return acc + Math.max(0, target - studied); // Clamp each subject at 0
   }, 0) / 60;
 
-  const rawPace = remainingDays > 0 ? (remainingHours / remainingDays) : 0;
-  let pace = Math.max(0, rawPace).toFixed(1);
+  const paceVal = remainingDays > 0 ? (remainingHours / remainingDays) : 0;
+  let pace = Math.max(0, paceVal).toFixed(1);
   if (pace === "-0.0" || Object.is(Number(pace), -0)) {
     pace = "0.0";
   }
@@ -2050,22 +2119,44 @@ function syncTimerOnWake() {
   const now = Date.now();
   const elapsedMs = now - data.timerLastTick;
   const elapsedSec = Math.floor(elapsedMs / 1000);
-  if (elapsedSec > 0) {
-    checkDayChange();
-    data.timerRemaining = Math.max(0, data.timerRemaining - elapsedSec);
-    if (data.timerMode === "focus") {
-      data.studySeconds = (data.studySeconds || 0) + elapsedSec;
-      const todayStr = getLocalDateString();
-      data.dailyStudy = data.dailyStudy || {};
-      data.dailyStudy[todayStr] = data.studySeconds;
-    }
-    data.timerLastTick += elapsedSec * 1000;
-    if (data.timerRemaining <= 0) {
-      completeTimerSession();
-    }
-    saveUser();
-    renderAll();
+  if (elapsedSec <= 0) return;
+
+  checkDayChange();
+
+  const mode = data.timerMode || "focus";
+  const maxAllowed = mode === "focus"
+    ? ((data.timerFocusDurationMin || 25) * 60)
+    : ((data.timerBreakDurationMin || 5) * 60);
+
+  const sessionRemaining = typeof data.timerRemaining === "number" ? data.timerRemaining : maxAllowed;
+  const actualElapsed = Math.min(elapsedSec, sessionRemaining, maxAllowed);
+
+  if (mode === "focus" && actualElapsed > 0) {
+    data.studySeconds = (data.studySeconds || 0) + actualElapsed;
+    const todayStr = getLocalDateString();
+    data.dailyStudy = data.dailyStudy || {};
+    data.dailyStudy[todayStr] = data.studySeconds;
   }
+
+  data.timerRemaining = Math.max(0, sessionRemaining - actualElapsed);
+  data.timerLastTick = now;
+
+  if (elapsedSec >= sessionRemaining || data.timerRemaining <= 0) {
+    data.timerRemaining = 0;
+    try {
+      completeTimerSession();
+      // If the laptop was asleep longer than maxAllowed, pause the timer to prevent indefinite background runs
+      if (elapsedSec >= maxAllowed && data) {
+        data.timerRunning = false;
+        resetDocumentTitle();
+      }
+    } catch (err) {
+      console.error("Error completing timer on wake:", err);
+    }
+  }
+
+  saveUser();
+  renderAll();
 }
 
 function updateTimerTitle() {
@@ -2118,19 +2209,33 @@ function startTimerLoop() {
     
     if (elapsedSec > 0) {
       checkDayChange();
-      data.timerRemaining = Math.max(0, data.timerRemaining - elapsedSec);
-      if (data.timerMode === "focus") {
-        data.studySeconds = (data.studySeconds || 0) + elapsedSec;
+      const mode = data.timerMode || "focus";
+      const maxAllowed = mode === "focus"
+        ? ((data.timerFocusDurationMin || 25) * 60)
+        : ((data.timerBreakDurationMin || 5) * 60);
+
+      const sessionRemaining = typeof data.timerRemaining === "number" ? data.timerRemaining : maxAllowed;
+      const actualElapsed = Math.min(elapsedSec, sessionRemaining, maxAllowed);
+
+      if (mode === "focus" && actualElapsed > 0) {
+        data.studySeconds = (data.studySeconds || 0) + actualElapsed;
         const todayStr = getLocalDateString();
         data.dailyStudy = data.dailyStudy || {};
         data.dailyStudy[todayStr] = data.studySeconds;
       }
       
-      data.timerLastTick += elapsedSec * 1000;
+      data.timerRemaining = Math.max(0, sessionRemaining - actualElapsed);
+      data.timerLastTick = now;
       
-      if (data.timerRemaining <= 0) {
+      if (elapsedSec >= sessionRemaining || data.timerRemaining <= 0) {
+        data.timerRemaining = 0;
+        const wasAsleepLong = elapsedSec >= maxAllowed;
         try {
           completeTimerSession();
+          if (wasAsleepLong && data) {
+            data.timerRunning = false;
+            resetDocumentTitle();
+          }
         } catch (err) {
           console.error("Error in completeTimerSession:", err);
         }
@@ -2174,8 +2279,8 @@ function completeTimerSession() {
   if (data.timerMode === "focus") {
     const totalSessionDurationSeconds = getTimerDuration("focus");
     const remainingSeconds = Math.max(0, data.timerRemaining !== undefined ? data.timerRemaining : 0);
-    const actualSecondsElapsed = totalSessionDurationSeconds - remainingSeconds;
-    const actualMinutes = Math.floor(actualSecondsElapsed / 60);
+    const actualSecondsElapsed = Math.min(totalSessionDurationSeconds, totalSessionDurationSeconds - remainingSeconds);
+    const actualMinutes = Math.min(180, Math.floor(actualSecondsElapsed / 60));
 
     const subjectEl = el("timerSubjectSelect");
     const activeSubject = subjectEl ? subjectEl.value : (data.subjects && data.subjects[0] ? data.subjects[0].name : "General");
@@ -2188,7 +2293,7 @@ function completeTimerSession() {
       data.dailySessions[todayStr] = data.sessionsToday;
 
       data.dailyStudy = data.dailyStudy || {};
-      data.dailyStudy[todayStr] = (data.dailyStudy[todayStr] || 0) + (actualMinutes * 60);
+      data.dailyStudy[todayStr] = Math.max(data.dailyStudy[todayStr] || 0, data.studySeconds || 0);
 
       const { currentStreak } = getStreakData();
       data.streak = currentStreak;
@@ -2204,6 +2309,7 @@ function completeTimerSession() {
           session_type: "focus",
           created_at: new Date().toISOString()
         });
+        if (typeof loadUserData === "function") loadUserData();
       }
       renderSubjects();
     } else {
