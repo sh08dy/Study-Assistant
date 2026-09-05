@@ -72,6 +72,7 @@ let currentCardIndex = 0;
 let cardFlipped = false;
 let cardShownTime = null;
 const collapsedDecks = new Set();
+let analyticsRangeDays = 7;
 
 function getLocalDateString(dateInput = new Date()) {
   if (!dateInput) return '';
@@ -1322,7 +1323,7 @@ async function login(email, supabaseUser = null) {
   closeAuthModal();
 
   // Update avatar & tooltips
-  const initials = (email || "SA").substring(0, 2).toUpperCase();
+  const initials = (email || "DP").substring(0, 2).toUpperCase();
   const userBtn = el("userButton");
   if (userBtn) {
     userBtn.textContent = initials;
@@ -1397,7 +1398,7 @@ async function logout() {
 
   const userBtn = el("userButton");
   if (userBtn) {
-    userBtn.textContent = "SA";
+    userBtn.textContent = "DP";
     userBtn.title = "Account (Not logged in)";
   }
 
@@ -2184,15 +2185,15 @@ function updateTimerTitle() {
   if (data && data.timerRunning && data.timerRemaining !== undefined) {
     const formattedMMSS = formatTime(data.timerRemaining);
     const modeLabel = data.timerMode === "break" ? "Break" : "Focus";
-    document.title = `(${formattedMMSS}) ${modeLabel} | Study Assistant`;
+    document.title = `(${formattedMMSS}) ${modeLabel} | DuePoint`;
   } else {
     resetDocumentTitle();
   }
 }
 
 function resetDocumentTitle() {
-  if (document.title !== "Study Assistant") {
-    document.title = "Study Assistant";
+  if (document.title !== "DuePoint") {
+    document.title = "DuePoint";
   }
 }
 window.resetDocumentTitle = resetDocumentTitle;
@@ -2570,6 +2571,8 @@ function normalizeData(savedData) {
   normalized.flashcardTotalTime = typeof normalized.flashcardTotalTime === 'number' ? normalized.flashcardTotalTime : 0;
   normalized.flashcardTotalCount = typeof normalized.flashcardTotalCount === 'number' ? normalized.flashcardTotalCount : 0;
   normalized.dailyFlashcards = normalized.dailyFlashcards || {};
+  normalized.analyticsRangeDays = Number(savedData.analyticsRangeDays) || 7;
+  analyticsRangeDays = normalized.analyticsRangeDays;
   
   if (typeof normalized.studySeconds !== "number") {
     normalized.studySeconds = Math.max(0, Number(savedData.studyMinutes || 0) * 60);
@@ -3829,43 +3832,86 @@ async function renderAnalyticsTab() {
     renderStats();
   }
 
-  // 1. Calculate overview metrics
-  // Total study time sum
-  const dailyStudy = data.dailyStudy || {};
-  let totalSeconds = Object.values(dailyStudy).reduce((acc, val) => acc + (Number(val) || 0), 0);
-  if (userStudySessions && userStudySessions.length > 0) {
-    const supabaseSessionSecs = userStudySessions.reduce((acc, s) => acc + (Number(s.duration_minutes) || 0) * 60, 0);
-    totalSeconds = Math.max(totalSeconds, supabaseSessionSecs);
+  updateAnalyticsToggleUI();
+
+  const N = analyticsRangeDays || 7;
+  const cutoff = Date.now() - (N * 24 * 60 * 60 * 1000);
+
+  // Collect range of local date strings for the selected window
+  const rangeDateStrings = [];
+  const today = new Date();
+  for (let i = N - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(today.getDate() - i);
+    rangeDateStrings.push(getLocalDateString(d));
   }
-  const totalHrs = Math.floor(totalSeconds / 3600);
-  const totalMins = Math.floor((totalSeconds % 3600) / 60);
+
+  // 1. Calculate overview metrics filtered strictly by the selected range
+  // Total study time sum in range
+  let rangeStudySeconds = 0;
+  rangeDateStrings.forEach(d => {
+    const dailySecs = (data && data.dailyStudy && Number(data.dailyStudy[d])) || 0;
+    const sessSecs = (userStudySessions || [])
+      .filter(s => getLocalDateString(s.created_at || s.timestamp || s.date) === d)
+      .reduce((acc, s) => acc + (Number(s.duration_minutes || (s.duration_seconds ? s.duration_seconds / 60 : 0) || s.duration || 0) * 60), 0);
+    rangeStudySeconds += Math.max(dailySecs, sessSecs);
+  });
+  const totalHrs = Math.floor(rangeStudySeconds / 3600);
+  const totalMins = Math.floor((rangeStudySeconds % 3600) / 60);
   el("analyticTotalHours").textContent = `${totalHrs}h ${totalMins}m`;
 
-  // Flashcards total
-  const totalReviews = Number(data.flashcards) || 0;
-  el("analyticTotalCards").textContent = totalReviews.toLocaleString();
-
-  // Focus sessions completed
-  const dailySessions = data.dailySessions || {};
-  let totalSessions = Object.values(dailySessions).reduce((acc, val) => acc + (Number(val) || 0), 0);
-  if (userStudySessions && userStudySessions.length > 0) {
-    totalSessions = Math.max(totalSessions, userStudySessions.length);
+  // Flashcards reviews in range
+  let rangeReviewsCount = 0;
+  if (Array.isArray(data.flashcardReviews) && data.flashcardReviews.length > 0) {
+    rangeReviewsCount = data.flashcardReviews.filter(r => {
+      const rTime = r.timestamp || (r.date ? new Date(r.date).getTime() : 0);
+      return rTime >= cutoff || rangeDateStrings.includes(getLocalDateString(rTime));
+    }).length;
+  } else if (data && data.dailyFlashcards) {
+    rangeDateStrings.forEach(d => {
+      rangeReviewsCount += Number(data.dailyFlashcards[d]) || 0;
+    });
+    if (rangeReviewsCount === 0 && (data.flashcardsToday || 0) > 0) {
+      rangeReviewsCount = data.flashcardsToday;
+    }
   }
-  el("analyticTotalSessions").textContent = totalSessions.toLocaleString();
+  el("analyticTotalCards").textContent = rangeReviewsCount.toLocaleString();
 
-  // Consistency Ratio: studied dates in last 30 days vs total tracked
-  const dates = Object.keys(dailyStudy);
-  const activeDays = dates.filter(d => Number(dailyStudy[d]) > 0).length;
-  const consistencyPercent = dates.length > 0 ? Math.round((activeDays / Math.max(30, dates.length)) * 100) : 0;
+  // Focus sessions completed in range
+  let rangeSessionsCount = 0;
+  rangeDateStrings.forEach(d => {
+    const dailySess = (data && data.dailySessions && Number(data.dailySessions[d])) || 0;
+    const sessCount = (userStudySessions || [])
+      .filter(s => getLocalDateString(s.created_at || s.timestamp || s.date) === d)
+      .length;
+    rangeSessionsCount += Math.max(dailySess, sessCount);
+  });
+  el("analyticTotalSessions").textContent = rangeSessionsCount.toLocaleString();
+
+  // Consistency Ratio: Number of days with active study sessions in the last N days divided by N
+  const activeDaysInRange = rangeDateStrings.filter(d => {
+    const dailySecs = (data && data.dailyStudy && Number(data.dailyStudy[d])) || 0;
+    const hasSess = (userStudySessions || []).some(s => {
+      const dateStr = getLocalDateString(s.created_at || s.timestamp || s.date);
+      const mins = Number(s.duration_minutes || s.duration || 0);
+      return dateStr === d && mins > 0;
+    });
+    return dailySecs > 0 || hasSess;
+  }).length;
+  const consistencyPercent = Math.round((activeDaysInRange / N) * 100);
   el("analyticConsistency").textContent = `${consistencyPercent}%`;
+  const consistencySub = el("analyticConsistencySub");
+  if (consistencySub) {
+    consistencySub.textContent = `${activeDaysInRange} of ${N} active days (${consistencyPercent}%)`;
+  }
 
-  // 2. Render SVG Line Chart (Study Hours Trend - Last 7 Days)
+  // 2. Render SVG Line Chart (Study Hours Trend - Last N Days)
   renderStudyHoursTrend();
 
-  // 3. Render SVG Donut Chart (Anki Review Quality Breakdown)
+  // 3. Render SVG Donut Chart (Anki Review Quality Breakdown - Last N Days)
   renderAnkiRatingsDonut();
 
-  // 4. Render SVG Bar Chart (Daily Focus Sessions completed)
+  // 4. Render SVG Bar Chart (Daily Focus Sessions completed - Last N Days)
   renderSessionsBarChart();
 
   // 5. Render Study Frequency Heatmap
@@ -3875,29 +3921,62 @@ async function renderAnalyticsTab() {
   renderSubjectStudyDistribution();
 
   // 6. Validate & Unlock Achievements
-  checkAchievements(totalSeconds, totalReviews, activeDays);
+  checkAchievements(rangeStudySeconds, rangeReviewsCount, activeDaysInRange);
 }
+
+function updateAnalyticsToggleUI() {
+  const btns = document.querySelectorAll(".analytics-time-toggle .time-toggle-btn");
+  btns.forEach(btn => {
+    const range = parseInt(btn.getAttribute("data-range"), 10);
+    btn.classList.toggle("active", range === analyticsRangeDays);
+  });
+  const sub = el("analyticsRangeSubtitle");
+  if (sub) {
+    sub.textContent = `Metrics and trends for the last ${analyticsRangeDays} days`;
+  }
+  const kicker = el("studyHoursTrendKicker");
+  if (kicker) {
+    kicker.textContent = `Study Hours Trend (Last ${analyticsRangeDays} Days)`;
+  }
+  const hoursSub = el("analyticTotalHoursSub");
+  if (hoursSub) {
+    hoursSub.textContent = `Last ${analyticsRangeDays} days logged focus`;
+  }
+  const cardsSub = el("analyticTotalCardsSub");
+  if (cardsSub) {
+    cardsSub.textContent = `Last ${analyticsRangeDays} days review activity`;
+  }
+  const sessSub = el("analyticTotalSessionsSub");
+  if (sessSub) {
+    sessSub.textContent = `Last ${analyticsRangeDays} days completed blocks`;
+  }
+}
+window.updateAnalyticsToggleUI = updateAnalyticsToggleUI;
 
 function renderStudyHoursTrend() {
   const container = el("studyHoursChartContainer");
   if (!container) return;
 
-  // Calculate the last 7 dates
   const points = [];
   const labels = [];
   const now = new Date();
+  const N = analyticsRangeDays || 7;
   
-  for (let i = 6; i >= 0; i--) {
+  for (let i = N - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(now.getDate() - i);
-    const dateStr = d.toISOString().split("T")[0];
-    const seconds = Number(data.dailyStudy?.[dateStr]) || 0;
+    const dateStr = getLocalDateString(d);
+    const dailySecs = (data.dailyStudy && Number(data.dailyStudy[dateStr])) || 0;
+    const sessSecs = (userStudySessions || [])
+      .filter(s => getLocalDateString(s.created_at || s.timestamp || s.date) === dateStr)
+      .reduce((acc, s) => acc + (Number(s.duration_minutes || (s.duration_seconds ? s.duration_seconds / 60 : 0) || s.duration || 0) * 60), 0);
+    const seconds = Math.max(dailySecs, sessSecs);
     const hours = Number((seconds / 3600).toFixed(2));
     points.push(hours);
-    labels.push(d.toLocaleDateString("en", { weekday: "short" }));
+    labels.push(d);
   }
 
-  const maxVal = Math.max(2, ...points); // scale at least to 2h max
+  const maxVal = Math.max(2, ...points);
   const width = 450;
   const height = 200;
   const paddingLeft = 35;
@@ -3908,14 +3987,12 @@ function renderStudyHoursTrend() {
   const chartWidth = width - paddingLeft - paddingRight;
   const chartHeight = height - paddingTop - paddingBottom;
 
-  // Coordinates
   const mappedPoints = points.map((val, i) => {
-    const x = paddingLeft + (i / 6) * chartWidth;
+    const x = paddingLeft + (i / Math.max(1, N - 1)) * chartWidth;
     const y = paddingTop + chartHeight - (val / maxVal) * chartHeight;
     return { x, y };
   });
 
-  // Build SVG Path
   let dPath = "";
   let dArea = "";
   mappedPoints.forEach((pt, i) => {
@@ -3931,7 +4008,6 @@ function renderStudyHoursTrend() {
     dArea += ` L ${mappedPoints[mappedPoints.length - 1].x} ${height - paddingBottom} L ${mappedPoints[0].x} ${height - paddingBottom} Z`;
   }
 
-  // Build Grid lines and labels
   let gridLines = "";
   const ticks = 4;
   for (let i = 0; i <= ticks; i++) {
@@ -3944,17 +4020,25 @@ function renderStudyHoursTrend() {
   }
 
   let xLabels = "";
-  labels.forEach((lbl, i) => {
-    const x = paddingLeft + (i / 6) * chartWidth;
-    xLabels += `
-      <text x="${x}" y="${height - 10}" class="chart-text" text-anchor="middle">${lbl}</text>
-    `;
+  const step = N <= 7 ? 1 : Math.ceil(N / 6);
+  labels.forEach((d, i) => {
+    if (i % step === 0 || i === N - 1) {
+      const x = paddingLeft + (i / Math.max(1, N - 1)) * chartWidth;
+      const text = N <= 7
+        ? d.toLocaleDateString("en", { weekday: "short" })
+        : d.toLocaleDateString("en", { month: "numeric", day: "numeric" });
+      xLabels += `
+        <text x="${x}" y="${height - 10}" class="chart-text" text-anchor="middle">${text}</text>
+      `;
+    }
   });
 
+  const ptRadius = N <= 7 ? 4 : 2.5;
   let dataPoints = "";
   mappedPoints.forEach((pt, i) => {
+    const dStr = getLocalDateString(labels[i]);
     dataPoints += `
-      <circle cx="${pt.x}" cy="${pt.y}" class="chart-point" data-tooltip="${points[i]} hrs" />
+      <circle cx="${pt.x}" cy="${pt.y}" r="${ptRadius}" class="chart-point" data-tooltip="${dStr}: ${points[i]} hrs" />
     `;
   });
 
@@ -3984,15 +4068,49 @@ function renderAnkiRatingsDonut() {
   const container = el("ankiRatingsChartContainer");
   if (!container) return;
 
-  const ratings = data.flashcardRatings || { easy: 0, good: 0, hard: 0 };
+  const N = analyticsRangeDays || 7;
+  const cutoff = Date.now() - (N * 24 * 60 * 60 * 1000);
+  const rangeDateStrings = [];
+  const now = new Date();
+  for (let i = N - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(now.getDate() - i);
+    rangeDateStrings.push(getLocalDateString(d));
+  }
+
+  const ratings = { again: 0, hard: 0, good: 0, easy: 0 };
+  let hasReviewsInWindow = false;
+
+  if (Array.isArray(data.flashcardReviews) && data.flashcardReviews.length > 0) {
+    data.flashcardReviews.forEach(r => {
+      const rTime = r.timestamp || (r.date ? new Date(r.date).getTime() : 0);
+      const rDate = getLocalDateString(rTime);
+      if (rTime >= cutoff || rangeDateStrings.includes(rDate)) {
+        const rating = (r.rating || "").toLowerCase();
+        if (ratings[rating] !== undefined) {
+          ratings[rating]++;
+          hasReviewsInWindow = true;
+        }
+      }
+    });
+  }
+
+  if (!hasReviewsInWindow && data.flashcardRatings) {
+    ratings.again = data.flashcardRatings.again || 0;
+    ratings.hard = data.flashcardRatings.hard || 0;
+    ratings.good = data.flashcardRatings.good || 0;
+    ratings.easy = data.flashcardRatings.easy || 0;
+  }
+
   const easy = ratings.easy || 0;
   const good = ratings.good || 0;
   const hard = ratings.hard || 0;
-  const total = easy + good + hard;
+  const again = ratings.again || 0;
+  const total = easy + good + hard + again;
 
   const radius = 60;
   const strokeWidth = 14;
-  const circumference = 2 * Math.PI * radius; // ~376.99
+  const circumference = 2 * Math.PI * radius;
   const center = 80;
 
   if (total === 0) {
@@ -4006,11 +4124,11 @@ function renderAnkiRatingsDonut() {
     return;
   }
 
-  // Segments details: color, count
   const segments = [
     { color: "var(--mint)", count: easy, label: "Easy" },
     { color: "var(--purple)", count: good, label: "Good" },
-    { color: "var(--red)", count: hard, label: "Hard" }
+    { color: "var(--amber)", count: hard, label: "Hard" },
+    { color: "var(--red)", count: again, label: "Again" }
   ].filter(s => s.count > 0);
 
   let accumulatedPercent = 0;
@@ -4019,7 +4137,7 @@ function renderAnkiRatingsDonut() {
   segments.forEach((seg) => {
     const percent = seg.count / total;
     const offset = circumference - percent * circumference;
-    const angle = accumulatedPercent * 360 - 90; // Start at top
+    const angle = accumulatedPercent * 360 - 90;
     
     circlesHtml += `
       <circle cx="${center}" cy="${center}" r="${radius}" fill="none" 
@@ -4030,7 +4148,6 @@ function renderAnkiRatingsDonut() {
     accumulatedPercent += percent;
   });
 
-  // Render legend helper
   let legendHtml = `
     <div style="display:flex; flex-direction:column; gap:8px; font-size:11px; margin-left: 20px;">
   `;
@@ -4049,11 +4166,8 @@ function renderAnkiRatingsDonut() {
   container.innerHTML = `
     <div style="display:flex; align-items:center; justify-content:center; width:100%;">
       <svg viewBox="0 0 160 160" width="160" height="160">
-        <!-- Backdrop Circle -->
         <circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="${strokeWidth}" />
-        <!-- Slices -->
         ${circlesHtml}
-        <!-- Text Inside -->
         <text x="${center}" y="${center - 2}" class="donut-label-title">${total}</text>
         <text x="${center}" y="${center + 14}" class="donut-label-sub">Reviews</text>
       </svg>
@@ -4069,17 +4183,21 @@ function renderSessionsBarChart() {
   const points = [];
   const labels = [];
   const now = new Date();
+  const N = analyticsRangeDays || 7;
 
-  for (let i = 6; i >= 0; i--) {
+  for (let i = N - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(now.getDate() - i);
-    const dateStr = d.toISOString().split("T")[0];
-    const sessions = Number(data.dailySessions?.[dateStr]) || 0;
-    points.push(sessions);
-    labels.push(d.toLocaleDateString("en", { weekday: "short" }));
+    const dateStr = getLocalDateString(d);
+    const dailySessions = (data.dailySessions && Number(data.dailySessions[dateStr])) || 0;
+    const sessCount = (userStudySessions || [])
+      .filter(s => getLocalDateString(s.created_at || s.timestamp || s.date) === dateStr)
+      .length;
+    points.push(Math.max(dailySessions, sessCount));
+    labels.push(d);
   }
 
-  const maxVal = Math.max(4, ...points); // scaled to at least 4 sessions
+  const maxVal = Math.max(4, ...points);
   const width = 450;
   const height = 200;
   const paddingLeft = 30;
@@ -4089,7 +4207,8 @@ function renderSessionsBarChart() {
 
   const chartWidth = width - paddingLeft - paddingRight;
   const chartHeight = height - paddingTop - paddingBottom;
-  const barWidth = Math.max(12, (chartWidth / 7) - 16);
+  const barSlotWidth = chartWidth / N;
+  const barWidth = N <= 7 ? Math.max(12, barSlotWidth - 16) : Math.max(4, barSlotWidth - 3);
 
   let gridLines = "";
   const ticks = 4;
@@ -4104,28 +4223,35 @@ function renderSessionsBarChart() {
 
   let barsHtml = "";
   points.forEach((val, i) => {
-    const x = paddingLeft + (i / 7) * chartWidth + 8;
+    const x = paddingLeft + i * barSlotWidth + (barSlotWidth - barWidth) / 2;
     const barHeight = (val / maxVal) * chartHeight;
     const y = paddingTop + chartHeight - barHeight;
+    const dStr = getLocalDateString(labels[i]);
 
     barsHtml += `
-      <rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" class="chart-bar" />
+      <rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="${N <= 7 ? 3 : 1.5}" class="chart-bar" data-tooltip="${dStr}: ${val} sessions" />
     `;
   });
 
   let xLabels = "";
-  labels.forEach((lbl, i) => {
-    const x = paddingLeft + (i / 7) * chartWidth + 8 + barWidth / 2;
-    xLabels += `
-      <text x="${x}" y="${height - 10}" class="chart-text" text-anchor="middle">${lbl}</text>
-    `;
+  const step = N <= 7 ? 1 : Math.ceil(N / 6);
+  labels.forEach((d, i) => {
+    if (i % step === 0 || i === N - 1) {
+      const x = paddingLeft + i * barSlotWidth + barSlotWidth / 2;
+      const text = N <= 7
+        ? d.toLocaleDateString("en", { weekday: "short" })
+        : d.toLocaleDateString("en", { month: "numeric", day: "numeric" });
+      xLabels += `
+        <text x="${x}" y="${height - 10}" class="chart-text" text-anchor="middle">${text}</text>
+      `;
+    }
   });
 
   container.innerHTML = `
     <svg viewBox="0 0 ${width} ${height}" width="100%" height="100%" style="overflow: visible;">
-      <!-- Grid Grid -->
+      <!-- Grid -->
       ${gridLines}
-      <!-- Bars Columns -->
+      <!-- Bars -->
       ${barsHtml}
       <!-- Labels -->
       ${xLabels}
@@ -4139,13 +4265,12 @@ function renderActivityHeatmap() {
   container.innerHTML = "";
 
   const now = new Date();
-  for (let i = 27; i >= 0; i--) { // 28 squares fits perfectly in a 7-wide grid!
+  for (let i = 27; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(now.getDate() - i);
-    const dateStr = d.toISOString().split("T")[0];
+    const dateStr = getLocalDateString(d);
     const seconds = Number(data.dailyStudy?.[dateStr]) || 0;
     
-    // Choose color depth
     let depthStyle = "background: var(--panel-2);";
     if (seconds > 0) {
       if (seconds < 900) {
@@ -4169,7 +4294,7 @@ function renderActivityHeatmap() {
 }
 
 function checkAchievements(totalSeconds, totalReviews, activeDays) {
-  const isDeepWorker = totalSeconds >= 3600; // 1 hour study
+  const isDeepWorker = totalSeconds >= 3600;
   const isCardMaster = totalReviews >= 100;
   const isConsistent = activeDays >= 5;
   const isStreakMaster = (Number(data.streak) || 0) >= 3 || (Number(data.bestStreak) || 0) >= 3;
@@ -4191,19 +4316,42 @@ function renderSubjectStudyDistribution() {
   const container = el("subjectAnalyticsChartContainer");
   if (!container) return;
 
+  const N = analyticsRangeDays || 7;
+  const cutoff = Date.now() - (N * 24 * 60 * 60 * 1000);
+  const rangeDateStrings = [];
+  const now = new Date();
+  for (let i = N - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(now.getDate() - i);
+    rangeDateStrings.push(getLocalDateString(d));
+  }
+
   const subjects = {};
 
   if (userStudySessions && userStudySessions.length > 0) {
     userStudySessions.forEach(s => {
-      const subj = s.subject || "General";
-      subjects[subj] = (subjects[subj] || 0) + 1;
+      const sDate = getLocalDateString(s.created_at || s.timestamp || s.date);
+      const sTime = new Date(s.created_at || s.timestamp || s.date).getTime();
+      if (sTime >= cutoff || rangeDateStrings.includes(sDate)) {
+        const subj = s.subject || "General";
+        const mins = Number(s.duration_minutes || (s.duration_seconds ? s.duration_seconds / 60 : 0) || s.duration || 0);
+        subjects[subj] = (subjects[subj] || 0) + (mins > 0 ? mins : 1);
+      }
     });
-  } else {
-    const tasks = data.tasks || [];
-    tasks.forEach(t => {
-      const tag = t.tag || "Review";
-      subjects[tag] = (subjects[tag] || 0) + 1;
+  }
+
+  if (Object.keys(subjects).length === 0) {
+    (data.subjects || []).forEach(s => {
+      const mins = Number(s.studiedMinutes || 0);
+      if (mins > 0) subjects[s.name || "General"] = mins;
     });
+    if (Object.keys(subjects).length === 0) {
+      const tasks = data.tasks || [];
+      tasks.forEach(t => {
+        const tag = t.tag || "Review";
+        subjects[tag] = (subjects[tag] || 0) + 1;
+      });
+    }
   }
 
   if (Object.keys(subjects).length === 0) {
@@ -4242,6 +4390,7 @@ function renderSubjectStudyDistribution() {
     const y = 20 + idx * 42;
     const color = colors[key] || palette[idx % palette.length];
     const label = labelMap[key] || key;
+    const displayVal = count >= 60 ? `${Math.floor(count / 60)}h ${count % 60}m` : `${count}m`;
 
     svgContent += `
       <!-- Label -->
@@ -4254,7 +4403,7 @@ function renderSubjectStudyDistribution() {
       <rect x="110" y="${y}" width="${Math.max(8, barWidth)}" height="18" rx="9" fill="${color}" />
       
       <!-- Value badge -->
-      <text x="${120 + barWidth}" y="${y + 13}" fill="var(--text)" font-size="10" font-weight="700">${count}</text>
+      <text x="${120 + barWidth}" y="${y + 13}" fill="var(--text)" font-size="10" font-weight="700">${displayVal}</text>
     `;
   });
 
@@ -4610,7 +4759,7 @@ function gatherCalendarEvents() {
         startTime: "09:00",
         endTime: "10:00",
         color: task.color || "#ff6e79",
-        desc: task.tag ? `Tag: ${task.tag}` : "Study Assistant Task"
+        desc: task.tag ? `Tag: ${task.tag}` : "DuePoint Task"
       });
     });
   }
@@ -5249,7 +5398,7 @@ function exportCalendarToICS() {
   let icsLines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//Study Assistant//Study Calendar//EN",
+    "PRODID:-//DuePoint//Study Calendar//EN",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH"
   ];
@@ -5258,7 +5407,7 @@ function exportCalendarToICS() {
     const dateClean = evt.date.replace(/-/g, "");
     
     icsLines.push("BEGIN:VEVENT");
-    icsLines.push(`UID:${evt.id}@studyassistant.com`);
+    icsLines.push(`UID:${evt.id}@duepoint.app`);
     
     const now = new Date();
     const stamp = now.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
@@ -5279,7 +5428,7 @@ function exportCalendarToICS() {
       const cleanDesc = evt.desc.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
       icsLines.push(`DESCRIPTION:${cleanDesc}`);
     } else {
-      icsLines.push("DESCRIPTION:Study Assistant Calendar Event");
+      icsLines.push("DESCRIPTION:DuePoint Calendar Event");
     }
     
     icsLines.push("END:VEVENT");
@@ -6141,6 +6290,21 @@ function bindEvents() {
         el("analyticsPage").classList.remove("hidden");
         renderAnalyticsTab();
       }
+    });
+  });
+
+  // Analytics 7-Day vs. 30-Day Range Switcher
+  const analyticsTimeBtns = document.querySelectorAll(".analytics-time-toggle .time-toggle-btn");
+  analyticsTimeBtns.forEach(btn => {
+    btn.addEventListener("click", () => {
+      const range = parseInt(btn.getAttribute("data-range"), 10) || 7;
+      analyticsRangeDays = range;
+      if (data) {
+        data.analyticsRangeDays = range;
+        saveUser();
+      }
+      updateAnalyticsToggleUI();
+      renderAnalyticsTab();
     });
   });
 

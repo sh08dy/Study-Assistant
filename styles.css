@@ -2815,3 +2815,52 @@ body.notes-focus-active .workspace {
   border: 1px solid rgba(88, 221, 210, 0.3);
 }
 
+/* Analytics Time Range Switcher */
+.analytics-time-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 4px;
+}
+
+.time-toggle-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.time-toggle-btn:hover {
+  color: var(--text);
+}
+
+.time-toggle-btn.active {
+  background: var(--purple);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(124, 103, 255, 0.35);
+}
+
+/* Brand Header in Topbar */
+.brand-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+
+.brand-header .brand-title {
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
