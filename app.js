@@ -287,12 +287,22 @@ function showAppPrompt(optionsOrTitle = {}, maybeMessage = "", maybeDefaultValue
     suffix = optionsOrTitle.suffix || suffix;
     confirmText = optionsOrTitle.confirmText || confirmText;
     cancelText = optionsOrTitle.cancelText || cancelText;
-  } else {
-    title = String(optionsOrTitle || "Input");
-    message = maybeMessage || "";
-    defaultValue = maybeDefaultValue !== undefined && maybeDefaultValue !== null ? maybeDefaultValue : "";
-    placeholder = maybePlaceholder || "";
-    inputType = maybeInputType || "text";
+  } else if (typeof optionsOrTitle === "string") {
+    // If called with standard 2-argument (message, defaultValue) pattern
+    if (maybeMessage !== "" && maybeDefaultValue === "" && (typeof maybeMessage === "number" || !isNaN(Number(maybeMessage)) || typeof maybeMessage === "string")) {
+      title = "Set Study Goal";
+      message = optionsOrTitle;
+      defaultValue = String(maybeMessage);
+      placeholder = "Minutes (e.g. 120)";
+      inputType = !isNaN(Number(maybeMessage)) ? "number" : "text";
+      suffix = !isNaN(Number(maybeMessage)) ? "mins" : "";
+    } else {
+      title = optionsOrTitle || "Input";
+      message = maybeMessage || "";
+      defaultValue = maybeDefaultValue !== undefined && maybeDefaultValue !== null ? maybeDefaultValue : "";
+      placeholder = maybePlaceholder || "";
+      inputType = maybeInputType || "text";
+    }
     confirmText = maybeConfirmText || "Save";
     cancelText = maybeCancelText || "Cancel";
   }
@@ -1361,7 +1371,7 @@ function setOverviewCardView(view) {
   const cdTab = el("tabExamCountdown");
   const yearView = el("yearProgressView");
   const cdView = el("examCountdownView");
-  const editBtn = el("editCountdownBtn");
+  const editBtn = el("editExamCountdownBtn") || el("editCountdownBtn");
 
   if (selectedView === "countdown") {
     if (yearTab) yearTab.classList.remove("active");
@@ -1387,6 +1397,28 @@ function setOverviewCardView(view) {
   }
 }
 window.setOverviewCardView = setOverviewCardView;
+
+function openExamCountdownModal() {
+  const modal = el("examCountdownModal");
+  if (!modal) return;
+  const exam = data && data.targetExam ? data.targetExam : { title: "USMLE Step 1 Exam", targetDate: "2026-11-15T09:00" };
+  const titleInput = el("examTitleInput");
+  const dateInput = el("examDateInput") || el("examDateTimeInput");
+  if (titleInput) titleInput.value = exam.title || "";
+  if (dateInput) dateInput.value = exam.targetDate || "";
+  modal.classList.remove("hidden");
+  modal.style.display = "flex";
+}
+window.openExamCountdownModal = openExamCountdownModal;
+
+function closeExamCountdownModal() {
+  const modal = el("examCountdownModal");
+  if (modal) {
+    modal.classList.add("hidden");
+    modal.style.display = "none";
+  }
+}
+window.closeExamCountdownModal = closeExamCountdownModal;
 
 function updateTimezoneLabel() {
   try {
@@ -1572,7 +1604,7 @@ function renderSubjects() {
     row.innerHTML = `
       <div style="display: flex; flex-direction: column; gap: 2px; overflow: hidden;">
         <label style="font-weight: 700; font-size: 13px; color: var(--text); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${escapeHtml(subject.name)}</label>
-        <span style="font-size: 10px; color: var(--muted);">${studiedMinutes}m / <button type="button" class="target-mins-btn" data-subject-index="${index}" onclick="promptChangeSubjectTargetTime(${index})" title="Click to customize target minutes" style="background: none; border: none; padding: 0; color: var(--soft); text-decoration: underline dotted; font-size: 10px; cursor: pointer;">${targetMinutes}m</button></span>
+        <span style="font-size: 10px; color: var(--muted);">${studiedMinutes}m / <button type="button" class="target-mins-btn" data-subject="${escapeHtml(subject.name)}" data-current-mins="${targetMinutes}" data-subject-index="${index}" title="Click to customize target minutes" style="background: none; border: none; padding: 0; color: var(--soft); text-decoration: underline dotted; font-size: 10px; cursor: pointer;">${targetMinutes}m</button></span>
       </div>
       <div class="coverage-progress-wrap" style="position: relative; height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; border: 1px solid var(--line);">
         <div class="coverage-progress-fill" style="height: 100%; width: ${percentage}%; background: ${color}; border-radius: 4px; transition: width 0.3s ease;"></div>
@@ -1592,6 +1624,19 @@ function renderSubjects() {
     list.append(row);
   });
 }
+
+function updateSubjectTarget(subjectName, newGoal) {
+  if (!data || !Array.isArray(data.subjects)) return;
+  const parsed = parseInt(newGoal, 10);
+  if (isNaN(parsed) || parsed <= 0) return;
+
+  const subject = data.subjects.find((s) => s.name === subjectName) || (!isNaN(Number(subjectName)) ? data.subjects[Number(subjectName)] : null);
+  if (subject) {
+    subject.targetMinutes = parsed;
+    saveUser();
+  }
+}
+window.updateSubjectTarget = updateSubjectTarget;
 
 function renderStreak() {
   checkDayChange();
@@ -5878,24 +5923,43 @@ function bindEvents() {
     renderStats();
   });
 
-  const subjectList = el("subjectList");
-  if (subjectList) {
-    subjectList.addEventListener("click", (event) => {
-      const targetBtn = event.target.closest(".target-mins-btn");
+  const coverageContainer = document.getElementById('subjectCoverageContainer') || el('subjectList');
+  if (coverageContainer) {
+    coverageContainer.addEventListener('click', async (e) => {
+      const targetBtn = e.target.closest('.target-mins-btn');
       if (!targetBtn) return;
-      event.preventDefault();
-      event.stopPropagation();
-      promptChangeSubjectTargetTime(targetBtn.dataset.subjectIndex);
+
+      const subjectName = targetBtn.dataset.subject;
+      const currentGoal = targetBtn.dataset.currentMins || 120;
+
+      const newGoalStr = await showAppPrompt(`Set target minutes for ${subjectName}:`, currentGoal);
+      if (newGoalStr === null) return;
+
+      const newGoal = parseInt(newGoalStr, 10);
+      if (!isNaN(newGoal) && newGoal > 0) {
+        updateSubjectTarget(subjectName, newGoal);
+        renderSubjectCoverage();
+      }
     });
   }
 
-  // Global delegation for target-mins-btn
-  document.addEventListener("click", (event) => {
-    const targetBtn = event.target.closest(".target-mins-btn");
-    if (targetBtn && targetBtn.dataset.subjectIndex !== undefined) {
-      event.preventDefault();
-      event.stopPropagation();
-      promptChangeSubjectTargetTime(targetBtn.dataset.subjectIndex);
+  // Fallback document delegation for target-mins-btn
+  document.addEventListener('click', async (e) => {
+    const targetBtn = e.target.closest('.target-mins-btn');
+    if (!targetBtn) return;
+    const cont = document.getElementById('subjectCoverageContainer');
+    if (cont && cont.contains(targetBtn)) return; // Handled by container listener above
+
+    const subjectName = targetBtn.dataset.subject;
+    const currentGoal = targetBtn.dataset.currentMins || 120;
+
+    const newGoalStr = await showAppPrompt(`Set target minutes for ${subjectName}:`, currentGoal);
+    if (newGoalStr === null) return;
+
+    const newGoal = parseInt(newGoalStr, 10);
+    if (!isNaN(newGoal) && newGoal > 0) {
+      updateSubjectTarget(subjectName, newGoal);
+      renderSubjectCoverage();
     }
   });
 
@@ -6255,33 +6319,37 @@ function bindEvents() {
   }
 
   // Exam Countdown Modal Bindings
-  const editCountdownBtn = el("editCountdownBtn");
+  const editCountdownBtn = el("editExamCountdownBtn") || el("editCountdownBtn");
   if (editCountdownBtn) {
-    editCountdownBtn.addEventListener("click", () => {
-      const modal = el("examCountdownModal");
-      if (!modal) return;
-      const exam = data && data.targetExam ? data.targetExam : { title: "USMLE Step 1 Exam", targetDate: "2026-11-15T09:00" };
-      const titleInput = el("examTitleInput");
-      const dateInput = el("examDateTimeInput");
-      if (titleInput) titleInput.value = exam.title || "";
-      if (dateInput) dateInput.value = exam.targetDate || "";
-      modal.classList.remove("hidden");
+    editCountdownBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      openExamCountdownModal();
     });
   }
 
+  // Document delegation for edit countdown button as extra safeguard
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("#editExamCountdownBtn, #editCountdownBtn");
+    if (btn) {
+      e.preventDefault();
+      openExamCountdownModal();
+    }
+  });
+
   const closeExamCountdownModalBtn = el("closeExamCountdownModalBtn");
   if (closeExamCountdownModalBtn) {
-    closeExamCountdownModalBtn.addEventListener("click", () => {
-      const modal = el("examCountdownModal");
-      if (modal) modal.classList.add("hidden");
-    });
+    closeExamCountdownModalBtn.addEventListener("click", closeExamCountdownModal);
   }
 
   const cancelExamCountdownBtn = el("cancelExamCountdownBtn");
   if (cancelExamCountdownBtn) {
-    cancelExamCountdownBtn.addEventListener("click", () => {
-      const modal = el("examCountdownModal");
-      if (modal) modal.classList.add("hidden");
+    cancelExamCountdownBtn.addEventListener("click", closeExamCountdownModal);
+  }
+
+  const examCountdownModal = el("examCountdownModal");
+  if (examCountdownModal) {
+    examCountdownModal.addEventListener("click", (e) => {
+      if (e.target === examCountdownModal) closeExamCountdownModal();
     });
   }
 
@@ -6290,7 +6358,7 @@ function bindEvents() {
     examCountdownForm.addEventListener("submit", (e) => {
       e.preventDefault();
       const titleInput = el("examTitleInput");
-      const dateInput = el("examDateTimeInput");
+      const dateInput = el("examDateInput") || el("examDateTimeInput");
       const title = titleInput ? titleInput.value.trim() : "";
       const targetDate = dateInput ? dateInput.value : "";
       if (!title || !targetDate) return;
@@ -6298,8 +6366,7 @@ function bindEvents() {
       if (!data) data = defaultData();
       data.targetExam = { title, targetDate };
       saveUser();
-      const modal = el("examCountdownModal");
-      if (modal) modal.classList.add("hidden");
+      closeExamCountdownModal();
       renderExamCountdown();
     });
   }

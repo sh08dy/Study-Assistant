@@ -76,7 +76,7 @@
                   <button type="button" class="card-toggle-tab active" id="tabYearProgress" data-view="year">Year Progress</button>
                   <button type="button" class="card-toggle-tab" id="tabExamCountdown" data-view="countdown">Exam Countdown</button>
                 </div>
-                <button type="button" id="editCountdownBtn" class="edit-countdown-btn hidden" title="Set Exam & Date">✎ Edit</button>
+                <button type="button" id="editExamCountdownBtn" class="edit-countdown-btn hidden" onclick="openExamCountdownModal()" title="Set Exam & Date">✎ Edit</button>
               </div>
 
               <!-- View 1: Year Progress -->
@@ -232,7 +232,7 @@
               </div>
             </section>
 
-            <article class="panel coverage-panel">
+            <article class="panel coverage-panel" id="subjectCoverageContainer">
               <div class="panel-kicker">Subject coverage</div>
               <div id="subjectList" class="subject-list"></div>
               <form id="subjectForm" class="inline-form">
@@ -736,8 +736,8 @@
             <input type="text" id="examTitleInput" placeholder="e.g. USMLE Step 1, Final Pathology Exam" required style="padding: 8px 12px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); outline: none; width: 100%;" />
           </div>
           <div style="display: flex; flex-direction: column; gap: 4px;">
-            <label for="examDateTimeInput" style="font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700;">Target Date & Time</label>
-            <input type="datetime-local" id="examDateTimeInput" required style="padding: 8px 12px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); outline: none; width: 100%; color-scheme: dark;" />
+            <label for="examDateInput" style="font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700;">Target Date & Time</label>
+            <input type="datetime-local" id="examDateInput" name="examDateInput" required style="padding: 8px 12px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); outline: none; width: 100%; color-scheme: dark;" />
           </div>
           <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px;">
             <button type="button" id="cancelExamCountdownBtn" style="padding: 8px 14px; font-size: 11px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); cursor: pointer;">Cancel</button>
