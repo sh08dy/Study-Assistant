@@ -140,6 +140,7 @@
                     </div>
                   </div>
 
+                  <div id="examPaceBadge" class="exam-pace-badge hidden">⚡ Pace: ~0.0 hrs/day needed</div>
                   <p id="countdownTargetDateStr" class="countdown-target-date">Target: Set date</p>
                 </div>
               </div>
@@ -199,6 +200,11 @@
                     </select>
                   </div>
                 </div>
+                <div class="setting-row" style="grid-column: 1 / -1; justify-content: flex-start; padding-top: 4px;">
+                  <label class="toggle-control" style="display: flex; align-items: center; gap: 8px; font-size: 11px; cursor: pointer; color: var(--muted); font-weight: 600;">
+                    <input type="checkbox" id="autoStartIntervalsToggle" style="accent-color: var(--purple); cursor: pointer;"> Auto-start intervals
+                  </label>
+                </div>
               </div>
             </article>
 
@@ -207,6 +213,7 @@
                 <span>Study time today <b>◴</b></span>
                 <strong id="studyTimeText">3h 40m</strong>
                 <i><em id="studyProgressBar"></em></i>
+                <div class="subject-distribution-bar" id="todaySubjectDistribution"></div>
                 <label class="goal-control">
                   <small id="studyGoalText">Goal: 6h · 61%</small>
                   <input id="studyGoalInput" type="number" min="0.25" max="24" step="0.25" value="6" aria-label="Daily study goal in hours" />
@@ -292,6 +299,7 @@
                 </label>
                 <button type="button" class="secondary-action" id="importWebLinkBtn" style="padding: 10px 16px; font-size: 12px; font-weight: 600; text-align: center; width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px;">🔗 Import via Web Link</button>
                 <button type="button" class="secondary-action" id="createDeckBtn" style="padding: 10px 16px; font-size: 12px; font-weight: 600; text-align: center; width: 100%;">Create New Deck</button>
+                <button type="button" class="secondary-action" id="exportDecksBtn" style="padding: 10px 16px; font-size: 12px; font-weight: 600; text-align: center; width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px;">💾 Export Decks</button>
               </div>
               <div id="deckList" class="deck-list">
                 <!-- Loaded decks will render here -->

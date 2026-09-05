@@ -907,6 +907,14 @@ button {
   padding: 2px;
   transition: all 0.2s ease;
   user-select: none;
+  cursor: pointer;
+}
+
+.streak-day:not(.spacer):hover {
+  transform: translateY(-2px);
+  border-color: var(--purple);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
+  z-index: 2;
 }
 
 .streak-day.spacer {
@@ -1375,8 +1383,8 @@ body.focusing .workspace {
 
 .rating-buttons {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
   width: 100%;
 }
 
@@ -1385,10 +1393,20 @@ body.focusing .workspace {
   background: var(--panel-2);
   color: var(--text);
   border-radius: 8px;
-  padding: 10px;
+  padding: 10px 4px;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 12px;
   transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.rating-buttons button[data-rating="again"]:hover {
+  border-color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.15);
+  color: #ff7875;
 }
 
 .rating-buttons button[data-rating="easy"]:hover {
@@ -1407,6 +1425,19 @@ body.focusing .workspace {
   border-color: var(--red);
   background: rgba(255, 110, 121, 0.12);
   color: var(--red);
+}
+
+.rating-buttons button .key-hint,
+.show-answer-btn .key-hint {
+  display: inline-block;
+  font-size: 9px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin-right: 3px;
+  font-family: monospace;
+  opacity: 0.8;
+  vertical-align: middle;
 }
 
 .show-answer-btn {
@@ -2715,3 +2746,76 @@ body.notes-focus-active .workspace {
   color: #8a8f98;
   line-height: 1.2;
 }
+
+/* Exam Burn-Down Pace Badge */
+.exam-pace-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--amber);
+  background: rgba(255, 179, 41, 0.12);
+  border: 1px solid rgba(255, 179, 41, 0.28);
+  border-radius: 12px;
+  padding: 3px 10px;
+  margin: 4px auto;
+  letter-spacing: 0.02em;
+}
+
+/* Daily Subject Time Distribution Bar */
+.subject-distribution-bar {
+  display: flex;
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 6px 0 8px;
+  gap: 1px;
+}
+
+.subject-distribution-bar.empty {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.distribution-segment {
+  height: 100%;
+  transition: width 0.3s ease;
+  position: relative;
+  cursor: help;
+}
+
+.distribution-segment:hover {
+  filter: brightness(1.25);
+}
+
+/* Deck Tree Badges (Due & Mastery) */
+.deck-info-tree .badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 8px;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+
+.deck-info-tree .badge-due {
+  color: var(--amber);
+  background: rgba(255, 179, 41, 0.14);
+  border: 1px solid rgba(255, 179, 41, 0.3);
+}
+
+.deck-info-tree .badge-due.none {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.deck-info-tree .badge-mastery {
+  color: var(--mint);
+  background: rgba(88, 221, 210, 0.14);
+  border: 1px solid rgba(88, 221, 210, 0.3);
+}
+

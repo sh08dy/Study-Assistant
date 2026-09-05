@@ -97,6 +97,7 @@ const defaultData = () => ({
   timerFocusDurationMin: 25,
   timerBreakDurationMin: 5,
   timerTargetSessions: 4,
+  autoStartIntervals: false,
   notesList: [],
   unlinkedNotes: [],
   isHost: false,
@@ -1369,6 +1370,7 @@ function renderExamCountdown() {
   const hoursEl = el("cdHours");
   const minsEl = el("cdMins");
   const secsEl = el("cdSecs");
+  const paceEl = el("examPaceBadge");
 
   if (!exam.targetDate) {
     if (daysEl) daysEl.textContent = "--";
@@ -1376,6 +1378,7 @@ function renderExamCountdown() {
     if (minsEl) minsEl.textContent = "--";
     if (secsEl) secsEl.textContent = "--";
     if (targetDateStrEl) targetDateStrEl.textContent = "Click 'Edit' to set an exam date";
+    if (paceEl) paceEl.classList.add("hidden");
     return;
   }
 
@@ -1393,6 +1396,7 @@ function renderExamCountdown() {
     if (minsEl) minsEl.textContent = "00";
     if (secsEl) secsEl.textContent = "00";
     if (targetDateStrEl) targetDateStrEl.textContent = "Milestone / Exam Reached! Good luck!";
+    if (paceEl) paceEl.classList.add("hidden");
     return;
   }
 
@@ -1406,6 +1410,19 @@ function renderExamCountdown() {
   if (hoursEl) hoursEl.textContent = String(hours).padStart(2, "0");
   if (minsEl) minsEl.textContent = String(mins).padStart(2, "0");
   if (secsEl) secsEl.textContent = String(secs).padStart(2, "0");
+
+  // Calculate Exam Burn-Down Daily Target Pace
+  const remainingDays = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+  const subjects = (data && Array.isArray(data.subjects)) ? data.subjects : [];
+  const remainingHours = Math.max(0, subjects.reduce((acc, s) => {
+    const studied = typeof getSubjectStudiedMinutes === "function" ? getSubjectStudiedMinutes(s.name) : (s.studiedMinutes || 0);
+    return acc + Math.max(0, (s.targetMinutes || 120) - studied);
+  }, 0) / 60);
+  const pace = (remainingHours / remainingDays).toFixed(1);
+  if (paceEl) {
+    paceEl.textContent = `⚡ Pace: ~${pace} hrs/day needed`;
+    paceEl.classList.remove("hidden");
+  }
 }
 
 function setOverviewCardView(view) {
@@ -1520,6 +1537,37 @@ function renderStats() {
   el("studyProgressBar").style.width = `${studyPercent}%`;
   el("studyGoalText").textContent = `Goal: ${formatGoalHours(data.studyGoal)} · ${studyPercent}%`;
   el("studyGoalInput").value = Number((data.studyGoal / 60).toFixed(2));
+
+  // Render Daily Subject Time Distribution Bar
+  const distBar = el("todaySubjectDistribution");
+  if (distBar) {
+    const todayStr = getLocalDateString();
+    const todaySessions = (userStudySessions || []).filter(s => s.created_at && getLocalDateString(s.created_at) === todayStr);
+    const subjectMinsMap = {};
+    let totalTodayMins = 0;
+    todaySessions.forEach(s => {
+      const subj = s.subject || "General";
+      const mins = Number(s.duration_minutes) || 0;
+      subjectMinsMap[subj] = (subjectMinsMap[subj] || 0) + mins;
+      totalTodayMins += mins;
+    });
+
+    if (totalTodayMins === 0) {
+      distBar.className = "subject-distribution-bar empty";
+      distBar.innerHTML = "";
+      distBar.title = "No study sessions logged today";
+    } else {
+      distBar.className = "subject-distribution-bar";
+      distBar.title = `Today's distribution: ${totalTodayMins}m total`;
+      distBar.innerHTML = Object.entries(subjectMinsMap).map(([subj, mins]) => {
+        const pct = Math.round((mins / totalTodayMins) * 100);
+        const color = getSubjectColor(subj);
+        const durationStr = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+        return `<div class="distribution-segment" style="width: ${(mins / totalTodayMins) * 100}%; background-color: ${color};" title="${escapeHtml(subj)}: ${durationStr} (${pct}%)"></div>`;
+      }).join("");
+    }
+  }
+
   const flashcardPercent = data.flashcardsGoal > 0 ? Math.min(100, Math.round(((data.flashcardsToday || 0) / data.flashcardsGoal) * 100)) : 0;
   el("flashcardsText").textContent = data.flashcardsToday || 0;
   el("flashcardsBar").style.width = `${flashcardPercent}%`;
@@ -1584,6 +1632,10 @@ function renderTimer() {
   }
   if (document.activeElement !== el("targetSessionsInput")) {
     el("targetSessionsInput").value = data.timerTargetSessions || 4;
+  }
+  const autoStartToggle = el("autoStartIntervalsToggle");
+  if (autoStartToggle) {
+    autoStartToggle.checked = !!(data && data.autoStartIntervals);
   }
 }
 
@@ -1715,9 +1767,23 @@ function renderStreak() {
       
       const cell = document.createElement("div");
       cell.className = "streak-day";
+      cell.style.cursor = "pointer";
+
+      // Map day to logged sessions for hover title details
+      const daySessions = (userStudySessions || []).filter(s => s.created_at && getLocalDateString(s.created_at) === dateStr);
+      let sessionCount = daySessions.length;
+      let totalMins = daySessions.reduce((acc, s) => acc + (Number(s.duration_minutes) || 0), 0);
+      const studyTime = data.dailyStudy[dateStr] || 0;
+      if (sessionCount === 0 && studyTime > 0) {
+        totalMins = Math.floor(studyTime / 60);
+        sessionCount = (data.dailySessions && data.dailySessions[dateStr]) || 1;
+      }
+      const hoursLogged = Math.floor(totalMins / 60);
+      const minsLogged = totalMins % 60;
+      const formattedDate = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+      cell.title = `${formattedDate}: ${hoursLogged}h ${minsLogged}m (${sessionCount} sessions)`;
       
       const isFuture = dateStr > todayStr;
-      const studyTime = data.dailyStudy[dateStr] || 0;
       
       if (isFuture) {
         cell.classList.add("future");
@@ -1780,9 +1846,23 @@ function renderStreak() {
       
       const cell = document.createElement("div");
       cell.className = "streak-day";
+      cell.style.cursor = "pointer";
+
+      // Map day to logged sessions for hover title details
+      const daySessions = (userStudySessions || []).filter(s => s.created_at && getLocalDateString(s.created_at) === dateStr);
+      let sessionCount = daySessions.length;
+      let totalMins = daySessions.reduce((acc, s) => acc + (Number(s.duration_minutes) || 0), 0);
+      const studyTime = data.dailyStudy[dateStr] || 0;
+      if (sessionCount === 0 && studyTime > 0) {
+        totalMins = Math.floor(studyTime / 60);
+        sessionCount = (data.dailySessions && data.dailySessions[dateStr]) || 1;
+      }
+      const hoursLogged = Math.floor(totalMins / 60);
+      const minsLogged = totalMins % 60;
+      const formattedDate = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+      cell.title = `${formattedDate}: ${hoursLogged}h ${minsLogged}m (${sessionCount} sessions)`;
       
       const isFuture = dateStr > todayStr;
-      const studyTime = data.dailyStudy[dateStr] || 0;
       if (studyTime > 0) {
         activeDaysCount++;
       }
@@ -1946,6 +2026,24 @@ function syncTimerOnWake() {
   }
 }
 
+function updateTimerTitle() {
+  if (data && data.timerRunning && data.timerRemaining !== undefined) {
+    const formattedMMSS = formatTime(data.timerRemaining);
+    const modeLabel = data.timerMode === "break" ? "Break" : "Focus";
+    document.title = `(${formattedMMSS}) ${modeLabel} | Study Assistant`;
+  } else {
+    resetDocumentTitle();
+  }
+}
+
+function resetDocumentTitle() {
+  if (document.title !== "Study Assistant") {
+    document.title = "Study Assistant";
+  }
+}
+window.resetDocumentTitle = resetDocumentTitle;
+window.updateTimerTitle = updateTimerTitle;
+
 function startTimerLoop() {
   stopTimerLoop();
   if (data) {
@@ -1956,7 +2054,11 @@ function startTimerLoop() {
     renderProgress();
     renderLiveClock();
     renderExamCountdown();
-    if (!data || !data.timerRunning) return;
+    if (!data || !data.timerRunning) {
+      resetDocumentTitle();
+      return;
+    }
+    updateTimerTitle();
     
     const now = Date.now();
     const elapsedMs = now - data.timerLastTick;
@@ -1990,10 +2092,13 @@ function stopTimerLoop() {
     window.clearInterval(timerId);
     timerId = null;
   }
+  resetDocumentTitle();
 }
 
 function completeTimerSession() {
   playTone("complete");
+  const shouldAutoStart = !!(data && data.autoStartIntervals);
+
   if (data.timerMode === "focus") {
     const totalSessionDurationSeconds = getTimerDuration("focus");
     const remainingSeconds = Math.max(0, data.timerRemaining !== undefined ? data.timerRemaining : 0);
@@ -2038,7 +2143,17 @@ function completeTimerSession() {
     data.timerMode = "focus";
   }
   data.timerRemaining = getTimerDuration(data.timerMode);
-  data.timerRunning = false;
+
+  if (shouldAutoStart) {
+    data.timerRunning = true;
+    data.timerLastTick = Date.now();
+    playTone("play");
+    updateTimerTitle();
+  } else {
+    data.timerRunning = false;
+    resetDocumentTitle();
+  }
+
   saveUser();
   renderStats();
   renderTimer();
@@ -2076,6 +2191,26 @@ function colorValue(name) {
     red: "#ff6e79"
   }[name] || "#7c67ff";
 }
+
+function getSubjectColor(subjName) {
+  if (data && Array.isArray(data.subjects)) {
+    const found = data.subjects.find(s => s.name && s.name.toLowerCase() === (subjName || "").toLowerCase());
+    if (found && found.color) {
+      return colorValue(found.color);
+    }
+  }
+  const defaults = {
+    pathology: "#7c67ff",
+    pharmacology: "#58ddd2",
+    anatomy: "#ffb329",
+    biochemistry: "#ffb329",
+    physiology: "#7c67ff",
+    exams: "#ff6e79",
+    general: "#3b82f6"
+  };
+  return defaults[(subjName || "").toLowerCase()] || "#7c67ff";
+}
+window.getSubjectColor = getSubjectColor;
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({
@@ -2624,6 +2759,7 @@ function cleanAnkiText(text, imagesMap = {}) {
 }
 
 function switchTab(pageName) {
+  resetDocumentTitle();
   const navBtn = document.querySelector(`.nav-item[data-page="${pageName}"]`);
   if (navBtn) {
     navBtn.click();
@@ -5376,6 +5512,21 @@ function renderTreeNode(node, depth = 0) {
   const childrenNames = Object.keys(node.children);
   const isLeaf = childrenNames.length === 0;
   const isCollapsed = collapsedDecks.has(node.fullName);
+
+  // Calculate Due Today count and Mastery percentage for this deck
+  const cards = getDeckCards(node.fullName);
+  const nowTime = Date.now();
+  let dueCount = 0;
+  let masteredCount = 0;
+  cards.forEach(card => {
+    if (!card.nextReviewDate || card.nextReviewDate <= nowTime) {
+      dueCount++;
+    }
+    if ((Number(card.interval) || 0) >= 21) {
+      masteredCount++;
+    }
+  });
+  const masteryPct = cards.length > 0 ? Math.round((masteredCount / cards.length) * 100) : 0;
   
   const header = document.createElement("div");
   header.className = `deck-item-header-tree ${currentStudyDeck === node.fullName ? "active" : ""}`;
@@ -5385,6 +5536,8 @@ function renderTreeNode(node, depth = 0) {
       ${!isLeaf ? `<span class="toggle-icon">${isCollapsed ? "▶" : "▼"}</span>` : `<span class="toggle-icon leaf">◈</span>`}
       <h3 class="deck-name" title="${escapeHtml(node.name)}">${escapeHtml(node.name)}</h3>
       <span class="card-count-badge">${node.cardsCount} cards</span>
+      <span class="badge badge-due ${dueCount === 0 ? 'none' : ''}">${dueCount} Due</span>
+      <span class="badge badge-mastery">${masteryPct}% Mastered</span>
     </div>
     <div class="deck-actions-tree">
       ${node.cardsCount > 0 ? `<button type="button" class="start-deck-btn-tree" data-deck="${escapeHtml(node.fullName)}">Study</button>` : ""}
@@ -5566,26 +5719,35 @@ function renderCardActions() {
   if (cardFlipped) {
     actionsContainer.innerHTML = `
       <div class="rating-buttons">
-        <button type="button" data-rating="hard" id="rateHardBtn">Hard</button>
-        <button type="button" data-rating="good" id="rateGoodBtn">Good</button>
-        <button type="button" data-rating="easy" id="rateEasyBtn">Easy</button>
+        <button type="button" data-rating="again" id="rateAgainBtn"><span class="key-hint">1</span> Again</button>
+        <button type="button" data-rating="hard" id="rateHardBtn"><span class="key-hint">2</span> Hard</button>
+        <button type="button" data-rating="good" id="rateGoodBtn"><span class="key-hint">3</span> Good</button>
+        <button type="button" data-rating="easy" id="rateEasyBtn"><span class="key-hint">4</span> Easy</button>
       </div>
     `;
     
-    el("rateHardBtn").addEventListener("click", (e) => { e.stopPropagation(); rateCard("hard"); });
-    el("rateGoodBtn").addEventListener("click", (e) => { e.stopPropagation(); rateCard("good"); });
-    el("rateEasyBtn").addEventListener("click", (e) => { e.stopPropagation(); rateCard("easy"); });
+    const againBtn = el("rateAgainBtn");
+    if (againBtn) againBtn.addEventListener("click", (e) => { e.stopPropagation(); rateCard("again"); });
+    const hardBtn = el("rateHardBtn");
+    if (hardBtn) hardBtn.addEventListener("click", (e) => { e.stopPropagation(); rateCard("hard"); });
+    const goodBtn = el("rateGoodBtn");
+    if (goodBtn) goodBtn.addEventListener("click", (e) => { e.stopPropagation(); rateCard("good"); });
+    const easyBtn = el("rateEasyBtn");
+    if (easyBtn) easyBtn.addEventListener("click", (e) => { e.stopPropagation(); rateCard("easy"); });
   } else {
     actionsContainer.innerHTML = `
-      <button type="button" class="show-answer-btn" id="showAnswerBtn">Show Answer</button>
+      <button type="button" class="show-answer-btn" id="showAnswerBtn"><span class="key-hint">Space / Enter</span> Show Answer</button>
     `;
     
-    el("showAnswerBtn").addEventListener("click", (e) => {
-      e.stopPropagation();
-      cardFlipped = true;
-      el("flashcardInner").classList.add("flipped");
-      renderCardActions();
-    });
+    const showBtn = el("showAnswerBtn");
+    if (showBtn) {
+      showBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        cardFlipped = true;
+        el("flashcardInner").classList.add("flipped");
+        renderCardActions();
+      });
+    }
   }
 }
 
@@ -5602,10 +5764,29 @@ function rateCard(rating) {
   data.flashcardTotalCount = (data.flashcardTotalCount || 0) + 1;
   
   if (!data.flashcardRatings) {
-    data.flashcardRatings = { easy: 0, good: 0, hard: 0 };
+    data.flashcardRatings = { again: 0, easy: 0, good: 0, hard: 0 };
   }
   data.flashcardRatings[rating] = (data.flashcardRatings[rating] || 0) + 1;
   
+  // SRS Interval and nextReviewDate calculation on current card
+  if (currentStudyCards && currentStudyCards[currentCardIndex]) {
+    const card = currentStudyCards[currentCardIndex];
+    let interval = Number(card.interval) || 0;
+    if (rating === "again") {
+      interval = 1;
+    } else if (rating === "hard") {
+      interval = Math.max(1, Math.round(interval * 1.2) || 1);
+    } else if (rating === "good") {
+      interval = interval === 0 ? 1 : (interval === 1 ? 3 : Math.round(interval * 2.5));
+    } else if (rating === "easy") {
+      interval = interval === 0 ? 4 : Math.max(4, Math.round(interval * 3.5));
+    }
+    card.interval = interval;
+    card.nextReviewDate = Date.now() + (interval * 24 * 60 * 60 * 1000);
+    card.lastReviewed = Date.now();
+    saveFlashcardDecks();
+  }
+
   const todayStr = getLocalDateString();
   data.dailyFlashcards = data.dailyFlashcards || {};
   data.dailyFlashcards[todayStr] = data.flashcardsToday;
@@ -5615,7 +5796,11 @@ function rateCard(rating) {
   currentCardIndex++;
   cardFlipped = false;
   renderActiveCard();
+  renderDeckList();
 }
+
+const renderDecksList = () => renderDeckList();
+window.renderDecksList = renderDeckList;
 
 function bindEvents() {
   el("loginTab").addEventListener("click", () => setAuthMode("login"));
@@ -5695,6 +5880,7 @@ function bindEvents() {
 
   document.querySelectorAll(".nav-item[data-page]").forEach((button) => {
     button.addEventListener("click", () => {
+      resetDocumentTitle();
       document.querySelectorAll(".nav-item").forEach((item) => item.classList.remove("active"));
       button.classList.add("active");
       el("pageTitle").textContent = button.dataset.page;
@@ -5929,6 +6115,7 @@ function bindEvents() {
       data.timerMode = button.dataset.mode;
       data.timerRemaining = getTimerDuration(data.timerMode);
       data.timerRunning = false;
+      resetDocumentTitle();
       saveUser();
       renderTimer();
     });
@@ -5939,6 +6126,9 @@ function bindEvents() {
     if (data.timerRunning) {
       data.timerLastTick = Date.now();
       playTone("play");
+      updateTimerTitle();
+    } else {
+      resetDocumentTitle();
     }
     saveUser();
     renderTimer();
@@ -5947,9 +6137,20 @@ function bindEvents() {
   el("resetTimer").addEventListener("click", () => {
     data.timerRemaining = getTimerDuration(data.timerMode);
     data.timerRunning = false;
+    resetDocumentTitle();
     saveUser();
     renderTimer();
   });
+
+  const autoStartToggle = el("autoStartIntervalsToggle");
+  if (autoStartToggle) {
+    autoStartToggle.addEventListener("change", (e) => {
+      if (data) {
+        data.autoStartIntervals = e.target.checked;
+        saveUser();
+      }
+    });
+  }
 
   const skipBtn = el("skipTimer");
   if (skipBtn) {
@@ -6192,6 +6393,72 @@ function bindEvents() {
       await showAppAlert(`Deck "${deckName}" created successfully!`, "Deck Created");
     });
   }
+
+  const exportDecksBtn = el("exportDecksBtn");
+  if (exportDecksBtn) {
+    exportDecksBtn.addEventListener("click", async () => {
+      try {
+        let decks = (data && data.flashcardDecks) ? data.flashcardDecks : {};
+        if (currentUser) {
+          const idbDecks = await idb.get(`flashcard-decks:${currentUser}`);
+          if (idbDecks && Object.keys(idbDecks).length > 0) {
+            decks = idbDecks;
+          }
+        }
+        const blob = new Blob([JSON.stringify({ exportDate: new Date().toISOString(), decks }, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `flashcards-backup-${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showAppAlert("Decks exported successfully as JSON backup!", "Backup Created");
+      } catch (err) {
+        console.error("Failed to export decks:", err);
+        showAppAlert("Failed to export decks: " + err.message, "Export Error");
+      }
+    });
+  }
+
+  // Full Keyboard Hotkey Navigation for Flashcards
+  window.addEventListener("keydown", (e) => {
+    // Guard against text input
+    const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : "";
+    if (tag === "input" || tag === "textarea" || tag === "select" || (e.target && e.target.isContentEditable)) return;
+
+    // Guard: strictly scoped to when active flashcard study view is visible
+    const flashcardsPage = el("flashcardsPage");
+    const isFlashcardPageActive = flashcardsPage && !flashcardsPage.classList.contains("hidden");
+    const isStudying = isFlashcardPageActive && currentStudyDeck && currentStudyCards && currentStudyCards.length > 0 && currentCardIndex < currentStudyCards.length;
+    if (!isStudying) return;
+
+    // Flip Card: Space or Enter
+    if (e.code === "Space" || e.key === " " || e.code === "Enter" || e.key === "Enter") {
+      e.preventDefault();
+      cardFlipped = !cardFlipped;
+      const inner = el("flashcardInner");
+      if (inner) inner.classList.toggle("flipped", cardFlipped);
+      renderCardActions();
+      return;
+    }
+
+    // SRS Grading (only enabled after card is flipped)
+    if (cardFlipped) {
+      if (e.key === "1" || e.code === "Digit1" || e.code === "Numpad1") {
+        e.preventDefault();
+        rateCard("again");
+      } else if (e.key === "2" || e.code === "Digit2" || e.code === "Numpad2") {
+        e.preventDefault();
+        rateCard("hard");
+      } else if (e.key === "3" || e.code === "Digit3" || e.code === "Numpad3") {
+        e.preventDefault();
+        rateCard("good");
+      } else if (e.key === "4" || e.code === "Digit4" || e.code === "Numpad4") {
+        e.preventDefault();
+        rateCard("easy");
+      }
+    }
+  });
 
   const closeDeckBtn = el("closeDeckBtn");
   if (closeDeckBtn) {
