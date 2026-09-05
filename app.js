@@ -208,10 +208,12 @@ function showAppAlert(messageOrOptions, maybeTitle = "Notice", maybeConfirmText 
       confirmBtn.classList.remove("hidden");
     }
     modal.classList.remove("hidden");
+    modal.style.removeProperty("display");
     if (confirmBtn) confirmBtn.focus();
 
     appDialogResolver = () => {
       modal.classList.add("hidden");
+      modal.style.removeProperty("display");
       resolve();
     };
   });
@@ -259,10 +261,12 @@ function showAppConfirm(messageOrOptions, maybeTitle = "Confirm", maybeConfirmTe
       confirmBtn.classList.remove("hidden");
     }
     modal.classList.remove("hidden");
+    modal.style.removeProperty("display");
     if (confirmBtn) confirmBtn.focus();
 
     appDialogResolver = (confirmed) => {
       modal.classList.add("hidden");
+      modal.style.removeProperty("display");
       resolve(Boolean(confirmed));
     };
   });
@@ -349,6 +353,7 @@ function showAppPrompt(optionsOrTitle = {}, maybeMessage = "", maybeDefaultValue
       confirmBtn.classList.remove("hidden");
     }
     modal.classList.remove("hidden");
+    modal.style.removeProperty("display");
     if (input) {
       setTimeout(() => {
         input.focus();
@@ -358,6 +363,7 @@ function showAppPrompt(optionsOrTitle = {}, maybeMessage = "", maybeDefaultValue
 
     appDialogResolver = (confirmed) => {
       modal.classList.add("hidden");
+      modal.style.removeProperty("display");
       if (confirmed && input) {
         resolve(input.value);
       } else {
@@ -1407,7 +1413,7 @@ function openExamCountdownModal() {
   if (titleInput) titleInput.value = exam.title || "";
   if (dateInput) dateInput.value = exam.targetDate || "";
   modal.classList.remove("hidden");
-  modal.style.display = "flex";
+  modal.style.removeProperty("display");
 }
 window.openExamCountdownModal = openExamCountdownModal;
 
@@ -1415,7 +1421,7 @@ function closeExamCountdownModal() {
   const modal = el("examCountdownModal");
   if (modal) {
     modal.classList.add("hidden");
-    modal.style.display = "none";
+    modal.style.removeProperty("display");
   }
 }
 window.closeExamCountdownModal = closeExamCountdownModal;

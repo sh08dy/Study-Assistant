@@ -2643,3 +2643,47 @@ body.notes-focus-active .workspace {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* High-Priority Modal Overlay and Card Interior */
+#examCountdownModal,
+#appDialogModal,
+.modal-overlay,
+.modal-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  background: rgba(0, 0, 0, 0.75) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 99999 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+#examCountdownModal.hidden,
+#appDialogModal.hidden,
+.modal-overlay.hidden,
+.modal-backdrop.hidden {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+#examCountdownModal .modal-content,
+#appDialogModal .modal-content,
+#examCountdownModal .modal-card,
+#appDialogModal .modal-card,
+#appDialogModal .dialog-modal-card {
+  position: relative !important;
+  z-index: 100000 !important;
+  background: #13141f !important; /* matching dashboard dark theme */
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 16px !important;
+  max-width: 420px !important;
+  width: 90% !important;
+}
