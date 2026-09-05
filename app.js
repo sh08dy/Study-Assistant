@@ -774,54 +774,74 @@ async function logStudySession(durationMinutes, subject = "General", sessionType
 function loadUserData() {
   if (!data) return;
 
-  // 1. Filter userStudySessions and prune or cap any single session where duration_minutes > 180 (or duration_seconds > 10800)
+  // 1. Remove or prune any session in userStudySessions whose duration exceeds 60 minutes or <= 0
+  const ghostIdsToDelete = [];
   if (Array.isArray(userStudySessions) && userStudySessions.length > 0) {
-    userStudySessions.forEach(s => {
+    userStudySessions = userStudySessions.filter(s => {
       const durMins = Number(s.duration_minutes || (s.duration_seconds ? s.duration_seconds / 60 : 0) || (s.duration || 0));
-      if (durMins > 180) {
-        console.warn(`[Sanitize] Capping bloated study session (${durMins}m) to 180m:`, s);
-        s.duration_minutes = 180;
-        if (s.duration_seconds) s.duration_seconds = 180 * 60;
-        if (s.duration) s.duration = 180;
-        if (supabaseClient && currentSupabaseUser && s.id) {
-          supabaseClient.from("study_sessions").update({ duration_minutes: 180 }).eq("id", s.id).then();
+      if (durMins > 60 || durMins <= 0) {
+        console.warn("[Sanitize] Removing ghost / bloated session:", s);
+        if (s.id) {
+          ghostIdsToDelete.push(s.id);
         }
+        return false;
+      }
+      return true;
+    });
+
+    if (ghostIdsToDelete.length > 0 && supabaseClient && currentSupabaseUser) {
+      supabaseClient.from("study_sessions").delete().in("id", ghostIdsToDelete).then(({ error }) => {
+        if (!error) console.log(`[Sanitize] Successfully purged ${ghostIdsToDelete.length} ghost session(s) from Supabase.`);
+      }).catch(err => console.error("Failed to delete ghost session from Supabase:", err));
+    }
+  }
+
+  // 2. Recalculate data.dailyStudy and data.studySeconds strictly by summing the durations of valid userStudySessions
+  const todayStr = getLocalDateString(new Date());
+  data.dailyStudy = data.dailyStudy || {};
+  data.dailySessions = data.dailySessions || {};
+
+  if (Array.isArray(userStudySessions) && userStudySessions.length > 0) {
+    const dateStudySecs = {};
+    const dateSessionCounts = {};
+
+    userStudySessions.forEach(s => {
+      const d = getLocalDateString(s.created_at || s.timestamp || s.date);
+      const mins = Number(s.duration_minutes || (s.duration_seconds ? s.duration_seconds / 60 : 0) || (s.duration || 0));
+      if (d && mins > 0 && mins <= 60) {
+        dateStudySecs[d] = (dateStudySecs[d] || 0) + (mins * 60);
+        dateSessionCounts[d] = (dateSessionCounts[d] || 0) + 1;
       }
     });
+
+    // Reset dailyStudy and dailySessions for all recorded dates strictly from valid sessions
+    Object.keys(dateStudySecs).forEach(d => {
+      data.dailyStudy[d] = dateStudySecs[d];
+      data.dailySessions[d] = dateSessionCounts[d] || 0;
+    });
+
+    // For today: Ensure the sum of today's actual valid sessions (e.g. 56m) is set as data.studySeconds and data.dailyStudy[todayStr]
+    const todayValidSecs = dateStudySecs[todayStr] !== undefined ? dateStudySecs[todayStr] : 0;
+    data.studySeconds = todayValidSecs;
+    data.dailyStudy[todayStr] = todayValidSecs;
+    data.sessionsToday = dateSessionCounts[todayStr] || 0;
+    data.dailySessions[todayStr] = data.sessionsToday;
+  } else {
+    // If userStudySessions is empty, guard against bloated drift > 16 hours
+    if ((data.studySeconds || 0) > 16 * 3600) {
+      data.studySeconds = 0;
+      data.dailyStudy[todayStr] = 0;
+    }
   }
 
-  // 2. Recalculate today's study time cleanly from the sanitized session array
-  const todayStr = getLocalDateString(new Date());
-  const todaySessions = (userStudySessions || []).filter(s => {
-    const sDate = getLocalDateString(s.created_at || s.timestamp || s.date);
-    return sDate === todayStr;
-  });
-  const recalculatedTodaySecs = todaySessions.reduce((acc, s) => {
-    return acc + (Number(s.duration_minutes || s.duration || 0) * 60);
-  }, 0);
-
-  // 3. Reset data.studySeconds if it exceeds total daily realistic hours (> 16 hours = 57,600s) or bloated drift
-  const maxDailySeconds = 16 * 3600;
-  if ((data.studySeconds || 0) > maxDailySeconds || (data.studySeconds || 0) > (recalculatedTodaySecs + 3600)) {
-    console.warn(`[Sanitize] Resetting bloated studySeconds (${data.studySeconds}s) to clean total ${recalculatedTodaySecs}s`);
-    data.studySeconds = recalculatedTodaySecs;
-  }
-
-  data.dailyStudy = data.dailyStudy || {};
-  if ((data.dailyStudy[todayStr] || 0) > maxDailySeconds || (data.dailyStudy[todayStr] || 0) > (recalculatedTodaySecs + 3600)) {
-    data.dailyStudy[todayStr] = recalculatedTodaySecs;
-  }
-
-  // Check historical dates in data.dailyStudy for values exceeding 16 hours
+  // Clean any historical entries in dailyStudy that exceed 16h
   Object.keys(data.dailyStudy).forEach(d => {
-    if (data.dailyStudy[d] > maxDailySeconds) {
-      const daySessions = (userStudySessions || []).filter(s => getLocalDateString(s.created_at || s.timestamp || s.date) === d);
-      const daySecs = daySessions.reduce((acc, s) => acc + (Number(s.duration_minutes || s.duration || 0) * 60), 0);
-      data.dailyStudy[d] = Math.min(daySecs, maxDailySeconds);
+    if (data.dailyStudy[d] > 16 * 3600) {
+      data.dailyStudy[d] = 0;
     }
   });
 
-  // Re-sync subjects studied minutes from sanitized sessions
+  // Re-sync subjects studied minutes strictly from sanitized valid sessions
   if (Array.isArray(data.subjects)) {
     data.subjects.forEach(s => {
       if (typeof getSubjectStudiedMinutes === "function") {
@@ -1483,22 +1503,23 @@ function renderExamCountdown() {
   if (minsEl) minsEl.textContent = String(mins).padStart(2, "0");
   if (secsEl) secsEl.textContent = String(secs).padStart(2, "0");
 
-  // Calculate Exam Burn-Down Daily Target Pace
-  const remainingDays = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
-  const subjects = (data && Array.isArray(data.subjects)) ? data.subjects : [];
-  const remainingHours = (subjects || []).reduce((acc, s) => {
+  // Calculate remaining minutes per subject, clamping each subject to 0
+  const remainingMinutes = (data.subjects || []).reduce((sum, s) => {
     const target = Number(s.targetMinutes || 120);
-    const studied = Number((typeof getSubjectStudiedMinutes === "function" ? getSubjectStudiedMinutes(s.name) : s.studiedMinutes) || s.studiedMinutes || 0);
-    return acc + Math.max(0, target - studied); // Clamp each subject at 0
-  }, 0) / 60;
+    const studied = Number(s.studiedMinutes || 0);
+    return sum + Math.max(0, target - studied);
+  }, 0);
 
-  const paceVal = remainingDays > 0 ? (remainingHours / remainingDays) : 0;
-  let pace = Math.max(0, paceVal).toFixed(1);
-  if (pace === "-0.0" || Object.is(Number(pace), -0)) {
-    pace = "0.0";
+  const remainingHours = remainingMinutes / 60;
+  const remainingDays = Math.max(1, Math.ceil((new Date(data.targetExam?.targetDate || Date.now()) - new Date()) / (1000 * 60 * 60 * 24)));
+  
+  let paceNumber = remainingHours / remainingDays;
+  if (!paceNumber || paceNumber < 0 || isNaN(paceNumber)) {
+    paceNumber = 0;
   }
+  const paceText = paceNumber.toFixed(1);
   if (paceEl) {
-    paceEl.textContent = `⚡ Pace: ~${pace} hrs/day needed`;
+    paceEl.textContent = `⚡ Pace: ~${paceText} hrs/day needed`;
     paceEl.classList.remove("hidden");
   }
 }
@@ -1981,11 +2002,12 @@ function renderStreak() {
     el("metricDays").textContent = activeDaysCount;
   }
   
-  // Calculate all-time study duration and session metrics
-  let totalSecondsAllTime = Object.values(data.dailyStudy || {}).reduce((acc, val) => acc + (Number(val) || 0), 0);
+  // Calculate all-time study duration and session metrics strictly from valid sessions
+  let totalSecondsAllTime = 0;
   if (Array.isArray(userStudySessions) && userStudySessions.length > 0) {
-    const sessionSecs = userStudySessions.reduce((acc, s) => acc + (Number(s.duration_minutes || s.duration || 0) * 60), 0);
-    totalSecondsAllTime = Math.max(totalSecondsAllTime, sessionSecs);
+    totalSecondsAllTime = userStudySessions.reduce((acc, s) => acc + (Number(s.duration_minutes || s.duration || 0) * 60), 0);
+  } else if (data && data.dailyStudy) {
+    totalSecondsAllTime = Object.values(data.dailyStudy).reduce((acc, val) => acc + (Number(val) || 0), 0);
   }
   const totalMinsAllTime = Math.floor(totalSecondsAllTime / 60);
   const hours = Math.floor(totalMinsAllTime / 60);
@@ -2001,9 +2023,11 @@ function renderStreak() {
     metricHoursEl.title = totalMinsAllTime < 60 ? `${mins}m total` : `${hours}h ${mins}m total`;
   }
   
-  let totalSessionsAllTime = Object.values(data.dailySessions || {}).reduce((acc, val) => acc + (Number(val) || 0), 0);
+  let totalSessionsAllTime = 0;
   if (Array.isArray(userStudySessions) && userStudySessions.length > 0) {
-    totalSessionsAllTime = Math.max(totalSessionsAllTime, userStudySessions.length);
+    totalSessionsAllTime = userStudySessions.length;
+  } else if (data && data.dailySessions) {
+    totalSessionsAllTime = Object.values(data.dailySessions).reduce((acc, val) => acc + (Number(val) || 0), 0);
   }
   const metricSessionsEl = el("metricSessions");
   if (metricSessionsEl) {
@@ -2144,14 +2168,14 @@ function syncTimerOnWake() {
   if (elapsedSec >= sessionRemaining || data.timerRemaining <= 0) {
     data.timerRemaining = 0;
     try {
-      completeTimerSession();
-      // If the laptop was asleep longer than maxAllowed, pause the timer to prevent indefinite background runs
-      if (elapsedSec >= maxAllowed && data) {
-        data.timerRunning = false;
-        resetDocumentTitle();
-      }
+      completeTimerSession({ forcePause: true });
     } catch (err) {
       console.error("Error completing timer on wake:", err);
+    }
+    // Always FORCE PAUSE when waking from a system sleep event
+    if (data) {
+      data.timerRunning = false;
+      resetDocumentTitle();
     }
   }
 
@@ -2229,9 +2253,9 @@ function startTimerLoop() {
       
       if (elapsedSec >= sessionRemaining || data.timerRemaining <= 0) {
         data.timerRemaining = 0;
-        const wasAsleepLong = elapsedSec >= maxAllowed;
+        const wasAsleepLong = elapsedSec >= maxAllowed || elapsedSec >= (sessionRemaining + 5);
         try {
-          completeTimerSession();
+          completeTimerSession({ forcePause: wasAsleepLong });
           if (wasAsleepLong && data) {
             data.timerRunning = false;
             resetDocumentTitle();
@@ -2272,9 +2296,10 @@ function stopTimerLoop() {
   resetDocumentTitle();
 }
 
-function completeTimerSession() {
+function completeTimerSession(options = {}) {
   playTone("complete");
-  const shouldAutoStart = !!(data && data.autoStartIntervals);
+  const forcePause = !!(options && options.forcePause);
+  const shouldAutoStart = !forcePause && !!(data && data.autoStartIntervals);
 
   if (data.timerMode === "focus") {
     const totalSessionDurationSeconds = getTimerDuration("focus");
@@ -2434,16 +2459,21 @@ function checkDayChange() {
 }
 
 function getStreakData() {
-  const dailyStudy = Object.assign({}, data ? data.dailyStudy : {});
+  const dailyStudy = {};
 
-  // Merge all recorded userStudySessions into dailyStudy
   if (Array.isArray(userStudySessions) && userStudySessions.length > 0) {
     userStudySessions.forEach(s => {
       const dateStr = getLocalDateString(s.created_at || s.timestamp || s.date);
       const mins = Number(s.duration_minutes || s.duration || 0);
-      if (dateStr && mins > 0) {
+      if (dateStr && mins > 0 && mins <= 60) {
         dailyStudy[dateStr] = (dailyStudy[dateStr] || 0) + (mins * 60);
       }
+    });
+  }
+
+  if (data && data.dailyStudy) {
+    Object.keys(data.dailyStudy).forEach(d => {
+      dailyStudy[d] = Math.max(dailyStudy[d] || 0, data.dailyStudy[d] || 0);
     });
   }
 
@@ -3775,17 +3805,19 @@ async function renderAnalyticsTab() {
     const aggregatedDailySessions = {};
 
     userStudySessions.forEach(s => {
-      const mins = Number(s.duration_minutes) || 0;
-      const dateStr = s.created_at ? s.created_at.substring(0, 10) : getLocalDateString();
-      aggregatedDailyStudy[dateStr] = (aggregatedDailyStudy[dateStr] || 0) + (mins * 60);
-      aggregatedDailySessions[dateStr] = (aggregatedDailySessions[dateStr] || 0) + 1;
+      const mins = Number(s.duration_minutes || (s.duration_seconds ? s.duration_seconds / 60 : 0) || 0);
+      const dateStr = getLocalDateString(s.created_at || s.timestamp || s.date);
+      if (dateStr && mins > 0 && mins <= 60) {
+        aggregatedDailyStudy[dateStr] = (aggregatedDailyStudy[dateStr] || 0) + (mins * 60);
+        aggregatedDailySessions[dateStr] = (aggregatedDailySessions[dateStr] || 0) + 1;
+      }
     });
 
     Object.keys(aggregatedDailyStudy).forEach(d => {
-      data.dailyStudy[d] = Math.max(data.dailyStudy[d] || 0, aggregatedDailyStudy[d]);
+      data.dailyStudy[d] = aggregatedDailyStudy[d];
     });
     Object.keys(aggregatedDailySessions).forEach(d => {
-      data.dailySessions[d] = Math.max(data.dailySessions[d] || 0, aggregatedDailySessions[d]);
+      data.dailySessions[d] = aggregatedDailySessions[d];
     });
 
     // Calculate streak from active study dates
