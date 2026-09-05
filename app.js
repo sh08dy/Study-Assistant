@@ -5614,7 +5614,6 @@ function renderTreeNode(node, depth = 0) {
   const cards = getDeckCards(node.fullName);
   const nowTime = Date.now();
   let dueCount = 0;
-  let masteredCount = 0;
   (cards || []).forEach(card => {
     const nextReview = card.nextReviewDate || (card.srs && card.srs.nextReviewDate) || card.due;
     if (!nextReview) {
@@ -5625,13 +5624,13 @@ function renderTreeNode(node, depth = 0) {
         dueCount++;
       }
     }
-    const interval = Number(card.interval || (card.srs && card.srs.interval) || 0);
-    const reps = Number(card.reps || (card.srs && card.srs.reps) || 0);
-    if (interval >= 7 || reps >= 3) {
-      masteredCount++;
-    }
   });
-  const masteryPct = (cards && cards.length > 0) ? Math.round((masteredCount / cards.length) * 100) : 0;
+
+  const masteredCards = (cards || []).filter(c => {
+    const reps = Number(c.reps || c.srs?.reps || 0);
+    return reps >= 2;
+  }).length;
+  const masteryPct = (cards && cards.length > 0) ? Math.round((masteredCards / cards.length) * 100) : 0;
   
   const header = document.createElement("div");
   header.className = `deck-item-header-tree ${currentStudyDeck === node.fullName ? "active" : ""}`;
