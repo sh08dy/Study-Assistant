@@ -73,11 +73,14 @@ let cardFlipped = false;
 let cardShownTime = null;
 const collapsedDecks = new Set();
 
-function getLocalDateString(date = new Date()) {
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
+function getLocalDateString(dateInput = new Date()) {
+  if (!dateInput) return '';
+  const date = dateInput instanceof Date ? dateInput : new Date(dateInput);
+  if (isNaN(date.getTime())) return ''; // Invalid date guard
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 const defaultData = () => ({
@@ -1539,33 +1542,42 @@ function renderStats() {
   el("studyGoalInput").value = Number((data.studyGoal / 60).toFixed(2));
 
   // Render Daily Subject Time Distribution Bar
-  const distBar = el("todaySubjectDistribution");
-  if (distBar) {
-    const todayStr = getLocalDateString();
-    const todaySessions = (userStudySessions || []).filter(s => s.created_at && getLocalDateString(s.created_at) === todayStr);
-    const subjectMinsMap = {};
-    let totalTodayMins = 0;
-    todaySessions.forEach(s => {
-      const subj = s.subject || "General";
-      const mins = Number(s.duration_minutes) || 0;
-      subjectMinsMap[subj] = (subjectMinsMap[subj] || 0) + mins;
-      totalTodayMins += mins;
-    });
+  try {
+    const distBar = el("todaySubjectDistribution");
+    if (distBar) {
+      const todayStr = getLocalDateString(new Date());
+      const todaySessions = (userStudySessions || []).filter(s => {
+        const sessionDateStr = getLocalDateString(s.created_at || s.timestamp || s.date);
+        return sessionDateStr === todayStr;
+      });
+      const subjectMinsMap = {};
+      let totalTodayMins = 0;
+      todaySessions.forEach(s => {
+        const subj = (s && s.subject ? String(s.subject).trim() : "") || "General";
+        const duration = Number(s.duration_minutes || s.duration || 0);
+        if (duration > 0) {
+          subjectMinsMap[subj] = (subjectMinsMap[subj] || 0) + duration;
+          totalTodayMins += duration;
+        }
+      });
 
-    if (totalTodayMins === 0) {
-      distBar.className = "subject-distribution-bar empty";
-      distBar.innerHTML = "";
-      distBar.title = "No study sessions logged today";
-    } else {
-      distBar.className = "subject-distribution-bar";
-      distBar.title = `Today's distribution: ${totalTodayMins}m total`;
-      distBar.innerHTML = Object.entries(subjectMinsMap).map(([subj, mins]) => {
-        const pct = Math.round((mins / totalTodayMins) * 100);
-        const color = getSubjectColor(subj);
-        const durationStr = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
-        return `<div class="distribution-segment" style="width: ${(mins / totalTodayMins) * 100}%; background-color: ${color};" title="${escapeHtml(subj)}: ${durationStr} (${pct}%)"></div>`;
-      }).join("");
+      if (totalTodayMins === 0) {
+        distBar.className = "subject-distribution-bar empty";
+        distBar.innerHTML = "";
+        distBar.title = "No study sessions logged today";
+      } else {
+        distBar.className = "subject-distribution-bar";
+        distBar.title = `Today's distribution: ${totalTodayMins}m total`;
+        distBar.innerHTML = Object.entries(subjectMinsMap).map(([subj, mins]) => {
+          const pct = Math.round((mins / totalTodayMins) * 100);
+          const color = getSubjectColor(subj);
+          const durationStr = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+          return `<div class="distribution-segment" style="width: ${(mins / totalTodayMins) * 100}%; background-color: ${color};" title="${escapeHtml(subj)}: ${durationStr} (${pct}%)"></div>`;
+        }).join("");
+      }
     }
+  } catch (err) {
+    console.error("Error rendering todaySubjectDistribution:", err);
   }
 
   const flashcardPercent = data.flashcardsGoal > 0 ? Math.min(100, Math.round(((data.flashcardsToday || 0) / data.flashcardsGoal) * 100)) : 0;
@@ -1770,9 +1782,9 @@ function renderStreak() {
       cell.style.cursor = "pointer";
 
       // Map day to logged sessions for hover title details
-      const daySessions = (userStudySessions || []).filter(s => s.created_at && getLocalDateString(s.created_at) === dateStr);
+      const daySessions = (userStudySessions || []).filter(s => getLocalDateString(s.created_at || s.timestamp || s.date) === dateStr);
       let sessionCount = daySessions.length;
-      let totalMins = daySessions.reduce((acc, s) => acc + (Number(s.duration_minutes) || 0), 0);
+      let totalMins = daySessions.reduce((acc, s) => acc + (Number(s.duration_minutes || s.duration || 0)), 0);
       const studyTime = data.dailyStudy[dateStr] || 0;
       if (sessionCount === 0 && studyTime > 0) {
         totalMins = Math.floor(studyTime / 60);
@@ -1849,9 +1861,9 @@ function renderStreak() {
       cell.style.cursor = "pointer";
 
       // Map day to logged sessions for hover title details
-      const daySessions = (userStudySessions || []).filter(s => s.created_at && getLocalDateString(s.created_at) === dateStr);
+      const daySessions = (userStudySessions || []).filter(s => getLocalDateString(s.created_at || s.timestamp || s.date) === dateStr);
       let sessionCount = daySessions.length;
-      let totalMins = daySessions.reduce((acc, s) => acc + (Number(s.duration_minutes) || 0), 0);
+      let totalMins = daySessions.reduce((acc, s) => acc + (Number(s.duration_minutes || s.duration || 0)), 0);
       const studyTime = data.dailyStudy[dateStr] || 0;
       if (sessionCount === 0 && studyTime > 0) {
         totalMins = Math.floor(studyTime / 60);
@@ -2051,14 +2063,24 @@ function startTimerLoop() {
     saveUser();
   }
   timerId = window.setInterval(() => {
-    renderProgress();
-    renderLiveClock();
-    renderExamCountdown();
+    try {
+      renderProgress();
+      renderLiveClock();
+      renderExamCountdown();
+    } catch (err) {
+      console.error("Error in timer header render:", err);
+    }
+
     if (!data || !data.timerRunning) {
       resetDocumentTitle();
       return;
     }
-    updateTimerTitle();
+
+    try {
+      updateTimerTitle();
+    } catch (err) {
+      console.error("Error updating timer title:", err);
+    }
     
     const now = Date.now();
     const elapsedMs = now - data.timerLastTick;
@@ -2077,11 +2099,31 @@ function startTimerLoop() {
       data.timerLastTick += elapsedSec * 1000;
       
       if (data.timerRemaining <= 0) {
-        completeTimerSession();
+        try {
+          completeTimerSession();
+        } catch (err) {
+          console.error("Error in completeTimerSession:", err);
+        }
       }
-      renderStats();
-      renderStreak();
-      renderTimer();
+
+      try {
+        renderStats();
+      } catch (err) {
+        console.error("Error in renderStats during timer tick:", err);
+      }
+
+      try {
+        renderStreak();
+      } catch (err) {
+        console.error("Error in renderStreak during timer tick:", err);
+      }
+
+      try {
+        renderTimer();
+      } catch (err) {
+        console.error("Error in renderTimer during timer tick:", err);
+      }
+
       saveUser();
     }
   }, 1000);
@@ -2155,10 +2197,10 @@ function completeTimerSession() {
   }
 
   saveUser();
-  renderStats();
-  renderTimer();
-  renderSubjects();
-  if (typeof renderSubjectCoverage === "function") renderSubjectCoverage();
+  try { renderStats(); } catch (e) { console.error("Error in renderStats:", e); }
+  try { renderTimer(); } catch (e) { console.error("Error in renderTimer:", e); }
+  try { renderSubjects(); } catch (e) { console.error("Error in renderSubjects:", e); }
+  try { if (typeof renderSubjectCoverage === "function") renderSubjectCoverage(); } catch (e) { console.error("Error in renderSubjectCoverage:", e); }
 }
 
 const renderSubjectCoverage = () => renderSubjects();
@@ -6155,7 +6197,11 @@ function bindEvents() {
   const skipBtn = el("skipTimer");
   if (skipBtn) {
     skipBtn.addEventListener("click", () => {
-      completeTimerSession();
+      try {
+        completeTimerSession();
+      } catch (err) {
+        console.error("Error skipping timer:", err);
+      }
     });
   }
 
