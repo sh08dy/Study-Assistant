@@ -2876,3 +2876,12 @@ button, .clickable, .time-toggle-btn, .badge {
   transform: translateZ(0);
 }
 
+/* Analytics Range Switching Fluid Transition */
+.analytics-grid, .analytics-overview-row {
+  transition: opacity 0.08s ease;
+}
+
+.analytics-grid.transitioning, .analytics-overview-row.transitioning {
+  opacity: 0.92;
+}
+

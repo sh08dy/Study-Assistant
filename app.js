@@ -782,6 +782,7 @@ async function logStudySession(durationMinutes, subject = "General", sessionType
 
     if (inserted && inserted.length > 0) {
       userStudySessions.push(inserted[0]);
+      if (typeof invalidateAnalyticsCache === "function") invalidateAnalyticsCache();
       if (typeof loadUserData === "function") loadUserData();
       if (typeof renderSubjects === "function") renderSubjects();
     }
@@ -2438,6 +2439,9 @@ function completeTimerSession(options = {}) {
     resetDocumentTitle();
   }
 
+  if (typeof invalidateAnalyticsCache === "function") {
+    invalidateAnalyticsCache();
+  }
   saveUser();
   try { renderStats(); } catch (e) { console.error("Error in renderStats:", e); }
   try { renderStreak(); } catch (e) { console.error("Error in renderStreak:", e); }
@@ -3879,134 +3883,176 @@ window.loadEditorNote = loadEditorNote;
 window.createNewIndependentNote = createNewIndependentNote;
 window.deleteActiveIndependentNote = deleteActiveIndependentNote;
 
+const analyticsCache = {
+  7: null,
+  30: null
+};
+
+function invalidateAnalyticsCache() {
+  analyticsCache[7] = null;
+  analyticsCache[30] = null;
+}
+window.invalidateAnalyticsCache = invalidateAnalyticsCache;
+window.analyticsCache = analyticsCache;
+
 async function renderAnalyticsTab() {
   if (!data) return;
 
-  // Fetch live study sessions from Supabase if authenticated
-  if (currentSupabaseUser) {
+  const options = (arguments.length > 0 && arguments[0]) ? arguments[0] : {};
+  // Fetch live study sessions from Supabase if authenticated and requested
+  if (currentSupabaseUser && options.fetchRemote) {
     await fetchUserStudySessions();
   }
 
   updateAnalyticsToggleUI();
 
   const N = analyticsRangeDays || 7;
-  const cutoff = Date.now() - (N * 24 * 60 * 60 * 1000);
+  let cached = analyticsCache[N];
 
-  // Collect range of local date strings for the selected window
-  const rangeDateStrings = [];
-  const today = new Date();
-  for (let i = N - 1; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - i);
-    rangeDateStrings.push(getLocalDateString(d));
-  }
-  const rangeDateSet = new Set(rangeDateStrings);
+  if (!cached) {
+    const cutoff = Date.now() - (N * 24 * 60 * 60 * 1000);
 
-  // Single-pass processing: Aggregate daily study/sessions sync, range sessions, and subject distribution simultaneously
-  const aggregatedDailyStudy = {};
-  const aggregatedDailySessions = {};
-  const sessionMinsMap = {};
-  const sessionCountMap = {};
-  const subjectMinsMap = {};
-
-  (userStudySessions || []).forEach(s => {
-    const rawDate = s.created_at || s.timestamp || s.date;
-    const sDate = getLocalDateString(rawDate);
-    if (!sDate) return;
-
-    const mins = Number(s.duration_minutes || (s.duration_seconds ? s.duration_seconds / 60 : 0) || s.duration || 0);
-
-    // Sync accumulator for daily study & sessions
-    if (mins > 0 && mins <= 60) {
-      aggregatedDailyStudy[sDate] = (aggregatedDailyStudy[sDate] || 0) + (mins * 60);
-      aggregatedDailySessions[sDate] = (aggregatedDailySessions[sDate] || 0) + 1;
+    // Collect range of local date strings for the selected window
+    const rangeDateStrings = [];
+    const today = new Date();
+    for (let i = N - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      rangeDateStrings.push(getLocalDateString(d));
     }
+    const rangeDateSet = new Set(rangeDateStrings);
 
-    // Active analytics window accumulator
-    const sTime = new Date(rawDate).getTime();
-    if (sTime >= cutoff || rangeDateSet.has(sDate)) {
-      sessionCountMap[sDate] = (sessionCountMap[sDate] || 0) + 1;
-      if (mins > 0) {
-        sessionMinsMap[sDate] = (sessionMinsMap[sDate] || 0) + mins;
+    // Single-pass processing: Aggregate daily study/sessions sync, range sessions, and subject distribution simultaneously
+    const aggregatedDailyStudy = {};
+    const aggregatedDailySessions = {};
+    const sessionMinsMap = {};
+    const sessionCountMap = {};
+    const subjectMinsMap = {};
+
+    (userStudySessions || []).forEach(s => {
+      const rawDate = s.created_at || s.timestamp || s.date;
+      const sDate = getLocalDateString(rawDate);
+      if (!sDate) return;
+
+      const mins = Number(s.duration_minutes || (s.duration_seconds ? s.duration_seconds / 60 : 0) || s.duration || 0);
+
+      // Sync accumulator for daily study & sessions
+      if (mins > 0 && mins <= 60) {
+        aggregatedDailyStudy[sDate] = (aggregatedDailyStudy[sDate] || 0) + (mins * 60);
+        aggregatedDailySessions[sDate] = (aggregatedDailySessions[sDate] || 0) + 1;
       }
-      const subj = s.subject || "General";
-      subjectMinsMap[subj] = (subjectMinsMap[subj] || 0) + (mins > 0 ? mins : 1);
-    }
-  });
 
-  // Sync Supabase sessions into local data state if available
-  if (userStudySessions && userStudySessions.length > 0) {
-    data.dailyStudy = data.dailyStudy || {};
-    data.dailySessions = data.dailySessions || {};
-
-    Object.keys(aggregatedDailyStudy).forEach(d => {
-      data.dailyStudy[d] = Math.max(data.dailyStudy[d] || 0, aggregatedDailyStudy[d]);
-    });
-    Object.keys(aggregatedDailySessions).forEach(d => {
-      data.dailySessions[d] = Math.max(data.dailySessions[d] || 0, aggregatedDailySessions[d]);
-    });
-
-    const { currentStreak } = getStreakData();
-    data.streak = currentStreak;
-    data.bestStreak = Math.max(data.bestStreak || 0, currentStreak);
-    renderStats();
-  }
-
-  // Flashcards reviews aggregation
-  const ratingsMap = { again: 0, hard: 0, good: 0, easy: 0 };
-  let rangeReviewsCount = 0;
-  let hasReviewsInWindow = false;
-
-  if (Array.isArray(data.flashcardReviews) && data.flashcardReviews.length > 0) {
-    data.flashcardReviews.forEach(r => {
-      const rTime = r.timestamp || (r.date ? new Date(r.date).getTime() : 0);
-      const rDate = getLocalDateString(rTime);
-      if (rTime >= cutoff || rangeDateSet.has(rDate)) {
-        rangeReviewsCount++;
-        const rating = (r.rating || "").toLowerCase();
-        if (ratingsMap[rating] !== undefined) {
-          ratingsMap[rating]++;
-          hasReviewsInWindow = true;
+      // Active analytics window accumulator
+      const sTime = new Date(rawDate).getTime();
+      if (sTime >= cutoff || rangeDateSet.has(sDate)) {
+        sessionCountMap[sDate] = (sessionCountMap[sDate] || 0) + 1;
+        if (mins > 0) {
+          sessionMinsMap[sDate] = (sessionMinsMap[sDate] || 0) + mins;
         }
+        const subj = s.subject || "General";
+        subjectMinsMap[subj] = (subjectMinsMap[subj] || 0) + (mins > 0 ? mins : 1);
       }
     });
-  }
-  const useDailyFlashcardsFallback = (!Array.isArray(data.flashcardReviews) || data.flashcardReviews.length === 0) && !!(data && data.dailyFlashcards);
 
-  if (!hasReviewsInWindow && data && data.flashcardRatings) {
-    ratingsMap.again = data.flashcardRatings.again || 0;
-    ratingsMap.hard = data.flashcardRatings.hard || 0;
-    ratingsMap.good = data.flashcardRatings.good || 0;
-    ratingsMap.easy = data.flashcardRatings.easy || 0;
-  }
+    // Sync Supabase sessions into local data state if available
+    if (userStudySessions && userStudySessions.length > 0) {
+      data.dailyStudy = data.dailyStudy || {};
+      data.dailySessions = data.dailySessions || {};
 
-  // Single-pass calculation for overview metrics, review fallback, and consistency ratio
-  let rangeStudySeconds = 0;
-  let rangeSessionsCount = 0;
-  let activeDaysInRange = 0;
+      Object.keys(aggregatedDailyStudy).forEach(d => {
+        data.dailyStudy[d] = Math.max(data.dailyStudy[d] || 0, aggregatedDailyStudy[d]);
+      });
+      Object.keys(aggregatedDailySessions).forEach(d => {
+        data.dailySessions[d] = Math.max(data.dailySessions[d] || 0, aggregatedDailySessions[d]);
+      });
 
-  rangeDateStrings.forEach(d => {
-    const dailySecs = (data && data.dailyStudy && Number(data.dailyStudy[d])) || 0;
-    const sessSecs = (sessionMinsMap[d] || 0) * 60;
-    const bestSecs = Math.max(dailySecs, sessSecs);
-    rangeStudySeconds += bestSecs;
-
-    const dailySess = (data && data.dailySessions && Number(data.dailySessions[d])) || 0;
-    const sessCount = sessionCountMap[d] || 0;
-    rangeSessionsCount += Math.max(dailySess, sessCount);
-
-    if (bestSecs > 0) {
-      activeDaysInRange++;
+      const { currentStreak } = getStreakData();
+      data.streak = currentStreak;
+      data.bestStreak = Math.max(data.bestStreak || 0, currentStreak);
+      renderStats();
     }
 
-    if (useDailyFlashcardsFallback) {
-      rangeReviewsCount += Number(data.dailyFlashcards[d]) || 0;
-    }
-  });
+    // Flashcards reviews aggregation
+    const ratingsMap = { again: 0, hard: 0, good: 0, easy: 0 };
+    let rangeReviewsCount = 0;
+    let hasReviewsInWindow = false;
 
-  if (useDailyFlashcardsFallback && rangeReviewsCount === 0 && (data.flashcardsToday || 0) > 0) {
-    rangeReviewsCount = data.flashcardsToday;
+    if (Array.isArray(data.flashcardReviews) && data.flashcardReviews.length > 0) {
+      data.flashcardReviews.forEach(r => {
+        const rTime = r.timestamp || (r.date ? new Date(r.date).getTime() : 0);
+        const rDate = getLocalDateString(rTime);
+        if (rTime >= cutoff || rangeDateSet.has(rDate)) {
+          rangeReviewsCount++;
+          const rating = (r.rating || "").toLowerCase();
+          if (ratingsMap[rating] !== undefined) {
+            ratingsMap[rating]++;
+            hasReviewsInWindow = true;
+          }
+        }
+      });
+    }
+    const useDailyFlashcardsFallback = (!Array.isArray(data.flashcardReviews) || data.flashcardReviews.length === 0) && !!(data && data.dailyFlashcards);
+
+    if (!hasReviewsInWindow && data && data.flashcardRatings) {
+      ratingsMap.again = data.flashcardRatings.again || 0;
+      ratingsMap.hard = data.flashcardRatings.hard || 0;
+      ratingsMap.good = data.flashcardRatings.good || 0;
+      ratingsMap.easy = data.flashcardRatings.easy || 0;
+    }
+
+    // Single-pass calculation for overview metrics, review fallback, and consistency ratio
+    let rangeStudySeconds = 0;
+    let rangeSessionsCount = 0;
+    let activeDaysInRange = 0;
+
+    rangeDateStrings.forEach(d => {
+      const dailySecs = (data && data.dailyStudy && Number(data.dailyStudy[d])) || 0;
+      const sessSecs = (sessionMinsMap[d] || 0) * 60;
+      const bestSecs = Math.max(dailySecs, sessSecs);
+      rangeStudySeconds += bestSecs;
+
+      const dailySess = (data && data.dailySessions && Number(data.dailySessions[d])) || 0;
+      const sessCount = sessionCountMap[d] || 0;
+      rangeSessionsCount += Math.max(dailySess, sessCount);
+
+      if (bestSecs > 0) {
+        activeDaysInRange++;
+      }
+
+      if (useDailyFlashcardsFallback) {
+        rangeReviewsCount += Number(data.dailyFlashcards[d]) || 0;
+      }
+    });
+
+    if (useDailyFlashcardsFallback && rangeReviewsCount === 0 && (data.flashcardsToday || 0) > 0) {
+      rangeReviewsCount = data.flashcardsToday;
+    }
+
+    analyticsCache[N] = {
+      rangeDateStrings,
+      sessionMinsMap,
+      sessionCountMap,
+      subjectMinsMap,
+      ratingsMap,
+      rangeStudySeconds,
+      rangeSessionsCount,
+      rangeReviewsCount,
+      activeDaysInRange
+    };
+    cached = analyticsCache[N];
   }
+
+  const {
+    rangeDateStrings,
+    sessionMinsMap,
+    sessionCountMap,
+    subjectMinsMap,
+    ratingsMap,
+    rangeStudySeconds,
+    rangeSessionsCount,
+    rangeReviewsCount,
+    activeDaysInRange
+  } = cached;
 
   const totalHrs = Math.floor(rangeStudySeconds / 3600);
   const totalMins = Math.floor((rangeStudySeconds % 3600) / 60);
@@ -4062,9 +4108,16 @@ function switchAnalyticsRange(range) {
   const sessSub = el("analyticTotalSessionsSub");
   if (sessSub) sessSub.textContent = `Last ${analyticsRangeDays} days completed blocks`;
 
+  const grid = document.querySelector('.analytics-grid');
+  const overview = document.querySelector('.analytics-overview-row');
+  if (grid) grid.classList.add('transitioning');
+  if (overview) overview.classList.add('transitioning');
+
   // Defer heavy chart recalculation to next painting frame
   requestAnimationFrame(() => {
-    renderAnalyticsTab();
+    renderAnalyticsTab({ fetchRemote: false });
+    if (grid) grid.classList.remove('transitioning');
+    if (overview) overview.classList.remove('transitioning');
   });
 }
 window.switchAnalyticsRange = switchAnalyticsRange;
@@ -4189,6 +4242,30 @@ function renderStudyHoursTrend(rangeDates, precomputedMinsMap) {
     `;
   });
 
+  const existingSvg = container.querySelector("svg");
+  if (existingSvg) {
+    const lineEl = existingSvg.querySelector(".chart-line");
+    const areaEl = existingSvg.querySelector(".chart-line-gradient");
+    const gridEl = existingSvg.querySelector(".chart-grid-group");
+    const pointsEl = existingSvg.querySelector(".chart-points-group");
+    const labelsEl = existingSvg.querySelector(".chart-labels-group");
+    if (lineEl && areaEl && gridEl && pointsEl && labelsEl) {
+      if (dPath) {
+        lineEl.setAttribute("d", dPath);
+        areaEl.setAttribute("d", dArea);
+        lineEl.style.display = "";
+        areaEl.style.display = "";
+      } else {
+        lineEl.style.display = "none";
+        areaEl.style.display = "none";
+      }
+      gridEl.innerHTML = gridLines;
+      pointsEl.innerHTML = dataPoints;
+      labelsEl.innerHTML = xLabels;
+      return;
+    }
+  }
+
   container.innerHTML = `
     <svg viewBox="0 0 ${width} ${height}" width="100%" height="100%" style="overflow: visible;">
       <defs>
@@ -4198,15 +4275,15 @@ function renderStudyHoursTrend(rangeDates, precomputedMinsMap) {
         </linearGradient>
       </defs>
       <!-- Grid -->
-      ${gridLines}
+      <g class="chart-grid-group">${gridLines}</g>
       <!-- Area under curve -->
-      ${dPath ? `<path d="${dArea}" class="chart-line-gradient" />` : ""}
+      ${dPath ? `<path d="${dArea}" class="chart-line-gradient" />` : `<path d="" class="chart-line-gradient" style="display:none;" />`}
       <!-- Line -->
-      ${dPath ? `<path d="${dPath}" class="chart-line" />` : ""}
+      ${dPath ? `<path d="${dPath}" class="chart-line" />` : `<path d="" class="chart-line" style="display:none;" />`}
       <!-- Points -->
-      ${dataPoints}
+      <g class="chart-points-group">${dataPoints}</g>
       <!-- X Labels -->
-      ${xLabels}
+      <g class="chart-labels-group">${xLabels}</g>
     </svg>
   `;
 }
@@ -4254,12 +4331,30 @@ function renderAnkiRatingsDonut(precomputedRatings) {
   const center = 80;
 
   if (total === 0) {
+    const existingWrapper = container.querySelector(".donut-chart-wrapper");
+    if (existingWrapper) {
+      const titleEl = existingWrapper.querySelector(".donut-label-title");
+      const subEl = existingWrapper.querySelector(".donut-label-sub");
+      const segmentsGroup = existingWrapper.querySelector(".donut-segments-group");
+      const legendEl = existingWrapper.querySelector(".donut-legend-container");
+      if (titleEl) titleEl.textContent = "0";
+      if (subEl) subEl.textContent = "Reviews";
+      if (segmentsGroup) segmentsGroup.innerHTML = "";
+      if (legendEl) legendEl.innerHTML = `<span style="color:var(--muted); font-size:12px;">No reviews in this window</span>`;
+      return;
+    }
     container.innerHTML = `
-      <svg viewBox="0 0 160 160" width="160" height="160">
-        <circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="var(--panel-2)" stroke-width="${strokeWidth}" />
-        <text x="${center}" y="${center + 5}" class="donut-label-title">0</text>
-        <text x="${center}" y="${center + 20}" class="donut-label-sub">Reviews</text>
-      </svg>
+      <div class="donut-chart-wrapper" style="display:flex; align-items:center; justify-content:center; width:100%;">
+        <svg viewBox="0 0 160 160" width="160" height="160">
+          <circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="var(--panel-2)" stroke-width="${strokeWidth}" />
+          <g class="donut-segments-group"></g>
+          <text x="${center}" y="${center + 5}" class="donut-label-title">0</text>
+          <text x="${center}" y="${center + 20}" class="donut-label-sub">Reviews</text>
+        </svg>
+        <div class="donut-legend-container" style="display:flex; flex-direction:column; gap:8px; font-size:11px; margin-left: 20px;">
+          <span style="color:var(--muted); font-size:12px;">No reviews in this window</span>
+        </div>
+      </div>
     `;
     return;
   }
@@ -4288,9 +4383,7 @@ function renderAnkiRatingsDonut(precomputedRatings) {
     accumulatedPercent += percent;
   });
 
-  let legendHtml = `
-    <div style="display:flex; flex-direction:column; gap:8px; font-size:11px; margin-left: 20px;">
-  `;
+  let legendHtml = "";
   segments.forEach(seg => {
     const pct = Math.round((seg.count / total) * 100);
     legendHtml += `
@@ -4301,17 +4394,33 @@ function renderAnkiRatingsDonut(precomputedRatings) {
       </div>
     `;
   });
-  legendHtml += `</div>`;
+
+  const existingWrapper = container.querySelector(".donut-chart-wrapper");
+  if (existingWrapper) {
+    const titleEl = existingWrapper.querySelector(".donut-label-title");
+    const subEl = existingWrapper.querySelector(".donut-label-sub");
+    const segmentsGroup = existingWrapper.querySelector(".donut-segments-group");
+    const legendEl = existingWrapper.querySelector(".donut-legend-container");
+    if (titleEl && segmentsGroup && legendEl) {
+      titleEl.textContent = total;
+      if (subEl) subEl.textContent = "Reviews";
+      segmentsGroup.innerHTML = circlesHtml;
+      legendEl.innerHTML = legendHtml;
+      return;
+    }
+  }
 
   container.innerHTML = `
-    <div style="display:flex; align-items:center; justify-content:center; width:100%;">
+    <div class="donut-chart-wrapper" style="display:flex; align-items:center; justify-content:center; width:100%;">
       <svg viewBox="0 0 160 160" width="160" height="160">
         <circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="${strokeWidth}" />
-        ${circlesHtml}
+        <g class="donut-segments-group">${circlesHtml}</g>
         <text x="${center}" y="${center - 2}" class="donut-label-title">${total}</text>
         <text x="${center}" y="${center + 14}" class="donut-label-sub">Reviews</text>
       </svg>
-      ${legendHtml}
+      <div class="donut-legend-container" style="display:flex; flex-direction:column; gap:8px; font-size:11px; margin-left: 20px;">
+        ${legendHtml}
+      </div>
     </div>
   `;
 }
@@ -4389,14 +4498,27 @@ function renderSessionsBarChart(rangeDates, precomputedCountsMap) {
     }
   });
 
+  const existingSvg = container.querySelector("svg");
+  if (existingSvg) {
+    const gridEl = existingSvg.querySelector(".chart-grid-group");
+    const barsEl = existingSvg.querySelector(".chart-bars-group");
+    const labelsEl = existingSvg.querySelector(".chart-labels-group");
+    if (gridEl && barsEl && labelsEl) {
+      gridEl.innerHTML = gridLines;
+      barsEl.innerHTML = barsHtml;
+      labelsEl.innerHTML = xLabels;
+      return;
+    }
+  }
+
   container.innerHTML = `
     <svg viewBox="0 0 ${width} ${height}" width="100%" height="100%" style="overflow: visible;">
       <!-- Grid -->
-      ${gridLines}
+      <g class="chart-grid-group">${gridLines}</g>
       <!-- Bars -->
-      ${barsHtml}
+      <g class="chart-bars-group">${barsHtml}</g>
       <!-- Labels -->
-      ${xLabels}
+      <g class="chart-labels-group">${xLabels}</g>
     </svg>
   `;
 }
@@ -4521,7 +4643,7 @@ function renderSubjectStudyDistribution(precomputedSubjectMins) {
   const keys = Object.keys(subjects).slice(0, 5);
   const maxCount = Math.max(...keys.map(k => subjects[k]), 1);
 
-  let svgContent = `<svg width="100%" height="200" viewBox="0 0 400 200" style="background: transparent;">`;
+  let barsContent = "";
 
   keys.forEach((key, idx) => {
     const count = subjects[key];
@@ -4532,7 +4654,7 @@ function renderSubjectStudyDistribution(precomputedSubjectMins) {
     const label = labelMap[key] || key;
     const displayVal = count >= 60 ? `${Math.floor(count / 60)}h ${count % 60}m` : `${count}m`;
 
-    svgContent += `
+    barsContent += `
       <!-- Label -->
       <text x="15" y="${y + 14}" fill="var(--soft)" font-size="11" font-weight="600">${escapeHtml(label)}</text>
       
@@ -4547,8 +4669,16 @@ function renderSubjectStudyDistribution(precomputedSubjectMins) {
     `;
   });
 
-  svgContent += `</svg>`;
-  container.innerHTML = svgContent;
+  const existingSvg = container.querySelector("svg");
+  if (existingSvg) {
+    const barsGroup = existingSvg.querySelector(".subject-bars-group");
+    if (barsGroup) {
+      barsGroup.innerHTML = barsContent;
+      return;
+    }
+  }
+
+  container.innerHTML = `<svg width="100%" height="200" viewBox="0 0 400 200" style="background: transparent;"><g class="subject-bars-group">${barsContent}</g></svg>`;
 }
 
 async function renderLibraryTab() {
@@ -6343,6 +6473,9 @@ function rateCard(rating) {
   data.dailyFlashcards = data.dailyFlashcards || {};
   data.dailyFlashcards[todayStr] = data.flashcardsToday;
   
+  if (typeof invalidateAnalyticsCache === "function") {
+    invalidateAnalyticsCache();
+  }
   debouncedSaveUser(400);
   
   currentCardIndex++;
@@ -6458,7 +6591,7 @@ function bindEvents() {
         fetchSharedResources();
       } else if (targetPage === "Analytics") {
         el("analyticsPage").classList.remove("hidden");
-        renderAnalyticsTab();
+        renderAnalyticsTab({ fetchRemote: true });
       }
     });
   });
