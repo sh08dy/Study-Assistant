@@ -2687,3 +2687,21 @@ body.notes-focus-active .workspace {
   max-width: 420px !important;
   width: 90% !important;
 }
+
+/* Subject Coverage Clean Layout */
+.subject-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+.subject-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.subject-meta-text {
+  font-size: 0.75rem;
+  color: #8a8f98;
+  line-height: 1.2;
+}

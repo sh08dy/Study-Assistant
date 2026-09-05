@@ -889,27 +889,67 @@ function renderSharedResourcesTab() {
       ? new Date(item.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
       : "Recent";
 
+    const isApkg = (item.file_url || "").toLowerCase().endsWith(".apkg");
+
+    const badgeHtml = isApkg 
+      ? `<span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; padding: 3px 8px; border-radius: 4px; background: #58ddd222; color: #58ddd2; border: 1px solid #58ddd244;">Anki Deck (.apkg)</span>`
+      : "";
+
+    const importBtnHtml = isApkg 
+      ? `<button type="button" class="import-apkg-btn primary-action" data-url="${escapeHtml(item.file_url)}" data-title="${escapeHtml(item.title || 'Shared Deck')}" style="display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 8px 12px; font-size: 11px; font-weight: 700; border-radius: 6px; box-sizing: border-box; background: var(--mint); color: #000; border: none; cursor: pointer;">
+          <span>📦</span> Import to Flashcards
+         </button>`
+      : "";
+
     return `
       <article class="panel resource-card" style="padding: 18px; display: flex; flex-direction: column; justify-content: space-between; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; transition: transform 0.2s, box-shadow 0.2s;">
         <div style="display: flex; flex-direction: column; gap: 8px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-            <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; padding: 3px 8px; border-radius: 4px; background: ${tagColor}22; color: ${tagColor}; border: 1px solid ${tagColor}44;">
-              ${escapeHtml(item.subject || "General")}
-            </span>
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+              <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; padding: 3px 8px; border-radius: 4px; background: ${tagColor}22; color: ${tagColor}; border: 1px solid ${tagColor}44;">
+                ${escapeHtml(item.subject || "General")}
+              </span>
+              ${badgeHtml}
+            </div>
             <span style="font-size: 11px; color: var(--muted);">${formattedDate}</span>
           </div>
           <h4 style="font-size: 14px; font-weight: 700; color: var(--text); margin: 4px 0 0 0; line-height: 1.4; word-break: break-word;">
             ${escapeHtml(item.title || "Untitled Resource")}
           </h4>
         </div>
-        <div>
-          <a href="${escapeHtml(item.file_url || '#')}" target="_blank" rel="noopener noreferrer" class="primary-action" style="display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; width: 100%; padding: 8px 12px; font-size: 11px; font-weight: 700; border-radius: 6px; box-sizing: border-box;">
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <a href="${escapeHtml(item.file_url || '#')}" target="_blank" rel="noopener noreferrer" class="secondary-action" style="display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; width: 100%; padding: 8px 12px; font-size: 11px; font-weight: 700; border-radius: 6px; box-sizing: border-box; background: var(--panel-2); color: var(--text); border: 1px solid var(--line);">
             <span>↗</span> Open / Download
           </a>
+          ${importBtnHtml}
         </div>
       </article>
     `;
   }).join("");
+
+  // Bind Import to Flashcards events
+  const importBtns = grid.querySelectorAll(".import-apkg-btn");
+  importBtns.forEach(btn => {
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      const fileUrl = btn.dataset.url;
+      const title = btn.dataset.title;
+      if (!fileUrl) return;
+      try {
+        switchTab("Flashcards");
+        const response = await fetch(fileUrl);
+        if (!response.ok) throw new Error("Network response was not ok.");
+        const arrayBuffer = await response.arrayBuffer();
+        
+        await importAnkiFromArrayBuffer(arrayBuffer, title);
+        
+        showAppAlert("Deck imported successfully!", "Success");
+      } catch (error) {
+        console.error(error);
+        showAppAlert("Failed to download or import Anki deck.", "Error");
+      }
+    });
+  });
 }
 
 // ----------------------------------------------------
@@ -1606,16 +1646,18 @@ function renderSubjects() {
 
     const row = document.createElement("div");
     row.className = "coverage-row";
-    row.style.cssText = "display: grid; grid-template-columns: minmax(105px, 1.2fr) 1fr 45px; align-items: center; gap: 10px; margin-bottom: 8px;";
+    row.style.cssText = "margin-bottom: 12px;";
     row.innerHTML = `
-      <div style="display: flex; flex-direction: column; gap: 2px; overflow: hidden;">
-        <label style="font-weight: 700; font-size: 13px; color: var(--text); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${escapeHtml(subject.name)}</label>
-        <span style="font-size: 10px; color: var(--muted);">${studiedMinutes}m / <button type="button" class="target-mins-btn" data-subject="${escapeHtml(subject.name)}" data-current-mins="${targetMinutes}" data-subject-index="${index}" title="Click to customize target minutes" style="background: none; border: none; padding: 0; color: var(--soft); text-decoration: underline dotted; font-size: 10px; cursor: pointer;">${targetMinutes}m</button></span>
+      <div class="subject-item-header">
+        <div class="subject-title-group">
+          <label style="font-weight: 700; font-size: 13px; color: var(--text);">${escapeHtml(subject.name)}</label>
+          <span class="subject-meta-text">${studiedMinutes}m / <button type="button" class="target-mins-btn" data-subject="${escapeHtml(subject.name)}" data-current-mins="${targetMinutes}" data-subject-index="${index}" title="Click to customize target minutes" style="background: none; border: none; padding: 0; color: var(--soft); text-decoration: underline dotted; font-size: inherit; cursor: pointer;">${targetMinutes}m</button></span>
+        </div>
+        <span style="font-size: 12px; font-weight: 700; color: var(--text);">${percentage}%</span>
       </div>
-      <div class="coverage-progress-wrap" style="position: relative; height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; border: 1px solid var(--line);">
+      <div class="coverage-progress-wrap" style="position: relative; height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; border: 1px solid var(--line); margin-top: 6px;">
         <div class="coverage-progress-fill" style="height: 100%; width: ${percentage}%; background: ${color}; border-radius: 4px; transition: width 0.3s ease;"></div>
       </div>
-      <span style="font-size: 12px; font-weight: 700; text-align: right; color: var(--text);">${percentage}%</span>
     `;
 
     const targetBtn = typeof row.querySelector === "function" ? row.querySelector(".target-mins-btn") : null;
@@ -2587,171 +2629,7 @@ async function handleAnkiImport(event) {
   reader.onload = async function(e) {
     const arrayBuffer = e.target.result;
     try {
-      el("studyViewContainer").innerHTML = `
-        <div class="empty-state">
-          <div class="icon">⏳</div>
-          <h3>Processing deck...</h3>
-          <p>Extracting Anki package files and media. Please wait.</p>
-        </div>
-      `;
-      
-      const zip = await JSZip.loadAsync(arrayBuffer);
-      let dbFile = zip.file("collection.anki21b");
-      if (!dbFile) {
-        dbFile = zip.file("collection.anki21");
-      }
-      if (!dbFile) {
-        dbFile = zip.file("collection.anki2");
-      }
-      if (!dbFile) {
-        throw new Error("Invalid .apkg file: collection database not found.");
-      }
-      
-      const dbDataRaw = await dbFile.async("uint8array");
-      let dbData = dbDataRaw;
-      if (isZstd(dbDataRaw)) {
-        if (typeof fzstd === "undefined") {
-          throw new Error("Zstandard decompression library (fzstd) is not loaded.");
-        }
-        dbData = fzstd.decompress(dbDataRaw);
-      }
-      
-      const imagesMap = {};
-      const mediaFile = zip.file("media");
-      if (mediaFile) {
-        let mediaBytes = await mediaFile.async("uint8array");
-        if (isZstd(mediaBytes)) {
-          if (typeof fzstd === "undefined") {
-            throw new Error("Zstandard decompression library (fzstd) is not loaded.");
-          }
-          mediaBytes = fzstd.decompress(mediaBytes);
-        }
-        
-        let mediaMap = {};
-        if (mediaBytes && mediaBytes.length > 0) {
-          if (mediaBytes[0] === 0x7b) {
-            const mediaJsonText = new TextDecoder().decode(mediaBytes);
-            try {
-              mediaMap = JSON.parse(mediaJsonText);
-            } catch (jsonErr) {
-              console.error("Failed to parse Anki media JSON:", jsonErr, mediaJsonText);
-              throw new Error("Invalid Anki media JSON: " + jsonErr.message + ". Content starts with: " + mediaJsonText.slice(0, 150));
-            }
-          } else {
-            try {
-              mediaMap = parseAnkiMediaProtobuf(mediaBytes);
-            } catch (protoErr) {
-              console.error("Failed to parse Anki media Protobuf:", protoErr);
-              throw new Error("Invalid Anki media Protobuf: " + protoErr.message);
-            }
-          }
-        }
-        
-        for (const zipKey in mediaMap) {
-          const filename = mediaMap[zipKey];
-          if (/\.(png|jpg|jpeg|gif|webp|svg)$/i.test(filename)) {
-            const imgFile = zip.file(zipKey);
-            if (imgFile) {
-              let fileBytes = await imgFile.async("uint8array");
-              if (isZstd(fileBytes)) {
-                if (typeof fzstd === "undefined") {
-                  throw new Error("Zstandard decompression library (fzstd) is not loaded.");
-                }
-                fileBytes = fzstd.decompress(fileBytes);
-              }
-              const ext = filename.split('.').pop().toLowerCase();
-              let mime = "image/png";
-              if (ext === "jpg" || ext === "jpeg") mime = "image/jpeg";
-              else if (ext === "gif") mime = "image/gif";
-              else if (ext === "webp") mime = "image/webp";
-              else if (ext === "svg") mime = "image/svg+xml";
-              
-              imagesMap[filename] = `data:${mime};base64,${uint8ArrayToBase64(fileBytes)}`;
-            }
-          }
-        }
-      }
-      
-      const SQL = await initSqlJs({
-        locateFile: filename => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${filename}`
-      });
-      
-      const db = new SQL.Database(dbData);
-      const deckIdToName = {};
-      
-      // Check if 'decks' table exists (Schema version 15/16+ / Anki 2.1.50+)
-      const tableCheck = db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='decks'");
-      if (tableCheck.length > 0 && tableCheck[0].values.length > 0) {
-        const decksQuery = db.exec("SELECT id, name FROM decks");
-        if (decksQuery.length > 0 && decksQuery[0].values) {
-          decksQuery[0].values.forEach(row => {
-            const id = row[0];
-            const name = row[1];
-            deckIdToName[id] = name.replace(/\x1f/g, "::");
-          });
-        }
-      } else {
-        // Fall back to legacy 'col.decks' JSON column
-        const colDecks = db.exec("SELECT decks FROM col");
-        if (colDecks.length === 0) {
-          throw new Error("Could not read decks metadata from collection.");
-        }
-        const rawDecks = colDecks[0].values[0][0];
-        let decksJson = {};
-        if (rawDecks && rawDecks.trim() !== "") {
-          try {
-            decksJson = JSON.parse(rawDecks);
-          } catch (jsonErr) {
-            console.error("Failed to parse Anki decks JSON:", jsonErr, rawDecks);
-            throw new Error("Invalid Anki decks JSON: " + jsonErr.message + ". Content starts with: " + String(rawDecks).slice(0, 150));
-          }
-        }
-        for (const id in decksJson) {
-          deckIdToName[id] = decksJson[id].name;
-        }
-      }
-      
-      const cardsQuery = db.exec("SELECT c.did, n.flds, c.ord FROM cards c JOIN notes n ON c.nid = n.id");
-      if (cardsQuery.length === 0) {
-        throw new Error("No cards found in the Anki database.");
-      }
-      
-      const rows = cardsQuery[0].values;
-      const importedDecks = {};
-      
-      rows.forEach(row => {
-        const deckId = row[0];
-        const fldsStr = row[1];
-        const ord = row[2];
-        
-        const deckName = deckIdToName[deckId] || "Default Deck";
-        const fields = fldsStr.split("\u001f");
-        
-        const front = fields[0] || "";
-        const back = fields[1] || "";
-        
-        const cleanFront = cleanAnkiText(front, imagesMap);
-        const cleanBack = cleanAnkiText(back, imagesMap);
-        
-        if (cleanFront && cleanBack) {
-          if (!importedDecks[deckName]) {
-            importedDecks[deckName] = [];
-          }
-          importedDecks[deckName].push({
-            front: cleanFront,
-            back: cleanBack,
-            ord: ord
-          });
-        }
-      });
-      
-      data.flashcardDecks = data.flashcardDecks || {};
-      for (const deckName in importedDecks) {
-        data.flashcardDecks[deckName] = importedDecks[deckName];
-      }
-      saveFlashcardDecks();
-      saveUser();
-      renderFlashcardsTab();
+      await importAnkiFromArrayBuffer(arrayBuffer, file.name);
     } catch (err) {
       console.error(err);
       el("studyViewContainer").innerHTML = `
@@ -2766,6 +2644,148 @@ async function handleAnkiImport(event) {
     }
   };
   reader.readAsArrayBuffer(file);
+}
+
+async function importAnkiFromArrayBuffer(arrayBuffer, fallbackFilename = "Imported Deck") {
+    el("studyViewContainer").innerHTML = `
+      <div class="empty-state">
+        <div class="icon">⏳</div>
+        <h3>Processing deck...</h3>
+        <p>Extracting Anki package files and media. Please wait.</p>
+      </div>
+    `;
+    
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    let dbFile = zip.file("collection.anki21b") || zip.file("collection.anki21") || zip.file("collection.anki2");
+    if (!dbFile) throw new Error("Invalid .apkg file: collection database not found.");
+    
+    const dbDataRaw = await dbFile.async("uint8array");
+    let dbData = dbDataRaw;
+    if (isZstd(dbDataRaw)) {
+      if (typeof fzstd === "undefined") throw new Error("Zstandard decompression library (fzstd) is not loaded.");
+      dbData = fzstd.decompress(dbDataRaw);
+    }
+    
+    const imagesMap = {};
+    const mediaFile = zip.file("media");
+    if (mediaFile) {
+      let mediaBytes = await mediaFile.async("uint8array");
+      if (isZstd(mediaBytes)) {
+        if (typeof fzstd === "undefined") throw new Error("Zstandard decompression library (fzstd) is not loaded.");
+        mediaBytes = fzstd.decompress(mediaBytes);
+      }
+      
+      let mediaMap = {};
+      if (mediaBytes && mediaBytes.length > 0) {
+        if (mediaBytes[0] === 0x7b) {
+          const mediaJsonText = new TextDecoder().decode(mediaBytes);
+          try {
+            mediaMap = JSON.parse(mediaJsonText);
+          } catch (jsonErr) {
+            console.error("Failed to parse Anki media JSON:", jsonErr, mediaJsonText);
+            throw new Error("Invalid Anki media JSON: " + jsonErr.message + ". Content starts with: " + mediaJsonText.slice(0, 150));
+          }
+        } else {
+          try {
+            if (typeof parseAnkiMediaProtobuf !== "undefined") {
+              mediaMap = parseAnkiMediaProtobuf(mediaBytes);
+            }
+          } catch (protoErr) {
+            console.error("Failed to parse Anki media Protobuf:", protoErr);
+          }
+        }
+      }
+      
+      for (const zipKey in mediaMap) {
+        const filename = mediaMap[zipKey];
+        if (/\.(png|jpg|jpeg|gif|webp|svg)$/i.test(filename)) {
+          const imgFile = zip.file(zipKey);
+          if (imgFile) {
+            let fileBytes = await imgFile.async("uint8array");
+            if (isZstd(fileBytes)) {
+              if (typeof fzstd === "undefined") throw new Error("Zstandard decompression library (fzstd) is not loaded.");
+              fileBytes = fzstd.decompress(fileBytes);
+            }
+            const ext = filename.split('.').pop().toLowerCase();
+            let mime = "image/png";
+            if (ext === "jpg" || ext === "jpeg") mime = "image/jpeg";
+            else if (ext === "gif") mime = "image/gif";
+            else if (ext === "webp") mime = "image/webp";
+            else if (ext === "svg") mime = "image/svg+xml";
+            
+            imagesMap[filename] = `data:${mime};base64,${uint8ArrayToBase64(fileBytes)}`;
+          }
+        }
+      }
+    }
+    
+    const SQL = await initSqlJs({ locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}` });
+    const dbSql = new SQL.Database(dbData);
+    const deckIdToName = {};
+    
+    const tableCheck = dbSql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='decks'");
+    if (tableCheck.length > 0 && tableCheck[0].values.length > 0) {
+      const decksQuery = dbSql.exec("SELECT id, name FROM decks");
+      if (decksQuery.length > 0 && decksQuery[0].values) {
+        decksQuery[0].values.forEach(row => {
+          deckIdToName[row[0]] = String(row[1]).replace(/\x1f/g, "::");
+        });
+      }
+    } else {
+      const colDecks = dbSql.exec("SELECT decks FROM col");
+      if (colDecks.length > 0) {
+        const rawDecks = colDecks[0].values[0][0];
+        if (rawDecks) {
+          try {
+            const decksJson = JSON.parse(rawDecks);
+            for (const id in decksJson) {
+              deckIdToName[id] = decksJson[id].name;
+            }
+          } catch(e) { console.error(e); }
+        }
+      }
+    }
+    
+    const query = `
+      SELECT c.did, n.flds, c.ord 
+      FROM cards c 
+      JOIN notes n ON c.nid = n.id
+    `;
+    const res = dbSql.exec(query);
+    if (!res || res.length === 0) {
+      throw new Error("No cards found in the Anki database.");
+    }
+    
+    const rows = res[0].values;
+    const importedDecks = {};
+    
+    rows.forEach(row => {
+      const deckId = row[0];
+      const fldsStr = row[1];
+      const ord = row[2];
+      
+      const deckName = deckIdToName[deckId] || fallbackFilename;
+      const fields = fldsStr.split("\x1f");
+      
+      const front = fields[0] || "";
+      const back = fields[1] || "";
+      
+      const cleanFront = cleanAnkiText(front, imagesMap);
+      const cleanBack = cleanAnkiText(back, imagesMap);
+      
+      if (cleanFront && cleanBack) {
+        if (!importedDecks[deckName]) importedDecks[deckName] = [];
+        importedDecks[deckName].push({ front: cleanFront, back: cleanBack, ord: ord });
+      }
+    });
+    
+    data.flashcardDecks = data.flashcardDecks || {};
+    for (const deckName in importedDecks) {
+      data.flashcardDecks[deckName] = importedDecks[deckName];
+    }
+    saveFlashcardDecks();
+    saveUser();
+    renderFlashcardsTab();
 }
 
 function updateSidebarUI() {
