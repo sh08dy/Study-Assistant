@@ -1564,9 +1564,9 @@ body.focusing .workspace {
   background: transparent;
   padding: 6px 8px;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
   transition: background-color 0.2s ease, color 0.2s ease;
   cursor: pointer;
   border-radius: 6px;
@@ -1582,37 +1582,73 @@ body.focusing .workspace {
   color: var(--purple-light);
 }
 
+.deck-title-row,
 .deck-info-tree {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex: 1;
+  width: 100%;
   min-width: 0;
 }
 
+.deck-title-row .toggle-icon,
 .deck-info-tree .toggle-icon {
   font-size: 10px;
   color: var(--muted);
   width: 12px;
   text-align: center;
   user-select: none;
+  flex-shrink: 0;
 }
 
+.deck-title-row .toggle-icon.leaf,
 .deck-info-tree .toggle-icon.leaf {
   color: var(--purple);
 }
 
+.deck-title-row .deck-name,
 .deck-info-tree .deck-name {
   margin: 0;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
+  min-width: 0;
 }
 
+.deck-title-row .delete-deck-btn-tree,
+.deck-actions-tree button.delete-deck-btn-tree {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.deck-title-row .delete-deck-btn-tree:hover,
+.deck-actions-tree button.delete-deck-btn-tree:hover {
+  color: var(--red);
+  background: rgba(255, 110, 121, 0.12);
+}
+
+.deck-node-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 18px;
+}
+
+.deck-node-actions .card-count-badge,
 .deck-info-tree .card-count-badge {
   font-size: 10px;
   color: var(--muted);
@@ -1622,43 +1658,25 @@ body.focusing .workspace {
   white-space: nowrap;
 }
 
-.deck-actions-tree {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
+.deck-node-actions button.start-deck-btn-tree,
+.deck-node-actions button.study-deck-btn,
 .deck-actions-tree button.start-deck-btn-tree {
   border: 0;
   background: var(--purple);
   color: white;
   border-radius: 4px;
-  padding: 3px 8px;
+  padding: 2px 8px;
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   transition: opacity 0.2s ease;
+  margin-left: auto;
 }
 
+.deck-node-actions button.start-deck-btn-tree:hover,
+.deck-node-actions button.study-deck-btn:hover,
 .deck-actions-tree button.start-deck-btn-tree:hover {
   opacity: 0.9;
-}
-
-.deck-actions-tree button.delete-deck-btn-tree {
-  background: transparent;
-  border: none;
-  color: var(--muted);
-  font-size: 12px;
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
-  transition: all 0.2s ease;
-  line-height: 1;
-}
-
-.deck-actions-tree button.delete-deck-btn-tree:hover {
-  color: var(--red);
-  background: rgba(255, 110, 121, 0.12);
 }
 
 .deck-tree-children {
@@ -2791,7 +2809,8 @@ body.notes-focus-active .workspace {
 }
 
 /* Deck Tree Badges (Due & Mastery) */
-.deck-info-tree .badge {
+.deck-info-tree .badge,
+.deck-node-actions .badge {
   font-size: 9px;
   font-weight: 700;
   padding: 2px 6px;
@@ -2801,19 +2820,22 @@ body.notes-focus-active .workspace {
   line-height: 1.2;
 }
 
-.deck-info-tree .badge-due {
+.deck-info-tree .badge-due,
+.deck-node-actions .badge-due {
   color: var(--amber);
   background: rgba(255, 179, 41, 0.14);
   border: 1px solid rgba(255, 179, 41, 0.3);
 }
 
-.deck-info-tree .badge-due.none {
+.deck-info-tree .badge-due.none,
+.deck-node-actions .badge-due.none {
   color: var(--muted);
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.deck-info-tree .badge-mastery {
+.deck-info-tree .badge-mastery,
+.deck-node-actions .badge-mastery {
   color: var(--mint);
   background: rgba(88, 221, 210, 0.14);
   border: 1px solid rgba(88, 221, 210, 0.3);

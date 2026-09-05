@@ -1417,11 +1417,17 @@ function renderExamCountdown() {
   // Calculate Exam Burn-Down Daily Target Pace
   const remainingDays = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
   const subjects = (data && Array.isArray(data.subjects)) ? data.subjects : [];
-  const remainingHours = Math.max(0, subjects.reduce((acc, s) => {
-    const studied = typeof getSubjectStudiedMinutes === "function" ? getSubjectStudiedMinutes(s.name) : (s.studiedMinutes || 0);
-    return acc + Math.max(0, (s.targetMinutes || 120) - studied);
-  }, 0) / 60);
-  const pace = Math.max(0, remainingHours / remainingDays).toFixed(1);
+  const remainingHours = (subjects || []).reduce((acc, s) => {
+    const target = Number(s.targetMinutes || 120);
+    const studied = typeof getSubjectStudiedMinutes === "function" ? getSubjectStudiedMinutes(s.name) : Number(s.studiedMinutes || 0);
+    return acc + Math.max(0, target - studied); // Clamp each subject at 0
+  }, 0) / 60;
+
+  const rawPace = remainingDays > 0 ? (remainingHours / remainingDays) : 0;
+  let pace = Math.max(0, rawPace).toFixed(1);
+  if (pace === "-0.0" || Object.is(Number(pace), -0)) {
+    pace = "0.0";
+  }
   if (paceEl) {
     paceEl.textContent = `⚡ Pace: ~${pace} hrs/day needed`;
     paceEl.classList.remove("hidden");
@@ -5609,30 +5615,39 @@ function renderTreeNode(node, depth = 0) {
   const nowTime = Date.now();
   let dueCount = 0;
   let masteredCount = 0;
-  cards.forEach(card => {
-    if (!card.nextReviewDate || card.nextReviewDate <= nowTime) {
+  (cards || []).forEach(card => {
+    const nextReview = card.nextReviewDate || (card.srs && card.srs.nextReviewDate) || card.due;
+    if (!nextReview) {
       dueCount++;
+    } else {
+      const reviewTime = typeof nextReview === "number" ? nextReview : new Date(nextReview).getTime();
+      if (isNaN(reviewTime) || reviewTime <= nowTime) {
+        dueCount++;
+      }
     }
-    if ((Number(card.interval) || 0) >= 21) {
+    const interval = Number(card.interval || (card.srs && card.srs.interval) || 0);
+    const reps = Number(card.reps || (card.srs && card.srs.reps) || 0);
+    if (interval >= 7 || reps >= 3) {
       masteredCount++;
     }
   });
-  const masteryPct = cards.length > 0 ? Math.round((masteredCount / cards.length) * 100) : 0;
+  const masteryPct = (cards && cards.length > 0) ? Math.round((masteredCount / cards.length) * 100) : 0;
   
   const header = document.createElement("div");
   header.className = `deck-item-header-tree ${currentStudyDeck === node.fullName ? "active" : ""}`;
+  header.setAttribute("data-deck", node.fullName);
   
   header.innerHTML = `
-    <div class="deck-info-tree">
+    <div class="deck-title-row">
       ${!isLeaf ? `<span class="toggle-icon">${isCollapsed ? "▶" : "▼"}</span>` : `<span class="toggle-icon leaf">◈</span>`}
       <h3 class="deck-name" title="${escapeHtml(node.name)}">${escapeHtml(node.name)}</h3>
+      <button type="button" class="delete-deck-btn-tree" title="Delete Deck" data-deck="${escapeHtml(node.fullName)}">✕</button>
+    </div>
+    <div class="deck-node-actions">
       <span class="card-count-badge">${node.cardsCount} cards</span>
       <span class="badge badge-due ${dueCount === 0 ? 'none' : ''}">${dueCount} Due</span>
       <span class="badge badge-mastery">${masteryPct}% Mastered</span>
-    </div>
-    <div class="deck-actions-tree">
-      ${node.cardsCount > 0 ? `<button type="button" class="start-deck-btn-tree" data-deck="${escapeHtml(node.fullName)}">Study</button>` : ""}
-      <button type="button" class="delete-deck-btn-tree" title="Delete Deck" data-deck="${escapeHtml(node.fullName)}">✕</button>
+      ${node.cardsCount > 0 ? `<button type="button" class="start-deck-btn-tree study-deck-btn" data-deck="${escapeHtml(node.fullName)}">Study</button>` : ""}
     </div>
   `;
   
@@ -5719,7 +5734,7 @@ function startStudySession(deckName) {
   
   document.querySelectorAll(".deck-item-header-tree").forEach(item => {
     const studyBtn = item.querySelector(".start-deck-btn-tree");
-    const itemDeck = studyBtn ? studyBtn.dataset.deck : null;
+    const itemDeck = item.dataset.deck || (studyBtn ? studyBtn.dataset.deck : null);
     item.classList.toggle("active", itemDeck === deckName);
   });
   
