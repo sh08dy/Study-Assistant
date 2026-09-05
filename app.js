@@ -1421,7 +1421,7 @@ function renderExamCountdown() {
     const studied = typeof getSubjectStudiedMinutes === "function" ? getSubjectStudiedMinutes(s.name) : (s.studiedMinutes || 0);
     return acc + Math.max(0, (s.targetMinutes || 120) - studied);
   }, 0) / 60);
-  const pace = (remainingHours / remainingDays).toFixed(1);
+  const pace = Math.max(0, remainingHours / remainingDays).toFixed(1);
   if (paceEl) {
     paceEl.textContent = `⚡ Pace: ~${pace} hrs/day needed`;
     paceEl.classList.remove("hidden");
@@ -1785,7 +1785,7 @@ function renderStreak() {
       const daySessions = (userStudySessions || []).filter(s => getLocalDateString(s.created_at || s.timestamp || s.date) === dateStr);
       let sessionCount = daySessions.length;
       let totalMins = daySessions.reduce((acc, s) => acc + (Number(s.duration_minutes || s.duration || 0)), 0);
-      const studyTime = data.dailyStudy[dateStr] || 0;
+      const studyTime = Math.max((data.dailyStudy && data.dailyStudy[dateStr]) || 0, totalMins * 60);
       if (sessionCount === 0 && studyTime > 0) {
         totalMins = Math.floor(studyTime / 60);
         sessionCount = (data.dailySessions && data.dailySessions[dateStr]) || 1;
@@ -1826,7 +1826,8 @@ function renderStreak() {
       const d = new Date(monday);
       d.setDate(monday.getDate() + i);
       const dateStr = getLocalDateString(d);
-      if ((data.dailyStudy[dateStr] || 0) > 0) {
+      const hasSessions = (userStudySessions || []).some(s => getLocalDateString(s.created_at || s.timestamp || s.date) === dateStr && Number(s.duration_minutes || s.duration || 0) > 0);
+      if ((data.dailyStudy && (data.dailyStudy[dateStr] || 0) > 0) || hasSessions) {
         activeDaysCount++;
       }
     }
@@ -1864,7 +1865,7 @@ function renderStreak() {
       const daySessions = (userStudySessions || []).filter(s => getLocalDateString(s.created_at || s.timestamp || s.date) === dateStr);
       let sessionCount = daySessions.length;
       let totalMins = daySessions.reduce((acc, s) => acc + (Number(s.duration_minutes || s.duration || 0)), 0);
-      const studyTime = data.dailyStudy[dateStr] || 0;
+      const studyTime = Math.max((data.dailyStudy && data.dailyStudy[dateStr]) || 0, totalMins * 60);
       if (sessionCount === 0 && studyTime > 0) {
         totalMins = Math.floor(studyTime / 60);
         sessionCount = (data.dailySessions && data.dailySessions[dateStr]) || 1;
@@ -1905,11 +1906,34 @@ function renderStreak() {
     el("metricDays").textContent = activeDaysCount;
   }
   
-  const totalSecondsAllTime = Object.values(data.dailyStudy).reduce((acc, val) => acc + (val || 0), 0);
-  el("metricHours").textContent = `${Math.floor(totalSecondsAllTime / 3600)}h`;
+  // Calculate all-time study duration and session metrics
+  let totalSecondsAllTime = Object.values(data.dailyStudy || {}).reduce((acc, val) => acc + (Number(val) || 0), 0);
+  if (Array.isArray(userStudySessions) && userStudySessions.length > 0) {
+    const sessionSecs = userStudySessions.reduce((acc, s) => acc + (Number(s.duration_minutes || s.duration || 0) * 60), 0);
+    totalSecondsAllTime = Math.max(totalSecondsAllTime, sessionSecs);
+  }
+  const totalMinsAllTime = Math.floor(totalSecondsAllTime / 60);
+  const hours = Math.floor(totalMinsAllTime / 60);
+  const mins = totalMinsAllTime % 60;
   
-  const totalSessionsAllTime = Object.values(data.dailySessions).reduce((acc, val) => acc + (val || 0), 0);
-  el("metricSessions").textContent = totalSessionsAllTime;
+  const metricHoursEl = el("metricHours");
+  if (metricHoursEl) {
+    if (totalMinsAllTime < 60) {
+      metricHoursEl.textContent = `${mins}m`;
+    } else {
+      metricHoursEl.textContent = mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+    }
+    metricHoursEl.title = totalMinsAllTime < 60 ? `${mins}m total` : `${hours}h ${mins}m total`;
+  }
+  
+  let totalSessionsAllTime = Object.values(data.dailySessions || {}).reduce((acc, val) => acc + (Number(val) || 0), 0);
+  if (Array.isArray(userStudySessions) && userStudySessions.length > 0) {
+    totalSessionsAllTime = Math.max(totalSessionsAllTime, userStudySessions.length);
+  }
+  const metricSessionsEl = el("metricSessions");
+  if (metricSessionsEl) {
+    metricSessionsEl.textContent = totalSessionsAllTime;
+  }
 }
 
 function renderTasks() {
@@ -2298,9 +2322,37 @@ function checkDayChange() {
 }
 
 function getStreakData() {
-  const dailyStudy = data.dailyStudy || {};
-  const studiedDates = Object.keys(dailyStudy).filter(dateStr => dailyStudy[dateStr] > 0);
-  const dates = studiedDates.map(d => new Date(d + 'T00:00:00'));
+  const dailyStudy = Object.assign({}, data ? data.dailyStudy : {});
+
+  // Merge all recorded userStudySessions into dailyStudy
+  if (Array.isArray(userStudySessions) && userStudySessions.length > 0) {
+    userStudySessions.forEach(s => {
+      const dateStr = getLocalDateString(s.created_at || s.timestamp || s.date);
+      const mins = Number(s.duration_minutes || s.duration || 0);
+      if (dateStr && mins > 0) {
+        dailyStudy[dateStr] = (dailyStudy[dateStr] || 0) + (mins * 60);
+      }
+    });
+  }
+
+  // If data.studySeconds > 0 for today, ensure today is in dailyStudy
+  const todayStr = getLocalDateString(new Date());
+  if (data && (data.studySeconds || 0) > 0) {
+    dailyStudy[todayStr] = Math.max(dailyStudy[todayStr] || 0, data.studySeconds);
+  }
+
+  if (data) {
+    data.dailyStudy = data.dailyStudy || {};
+    Object.keys(dailyStudy).forEach(d => {
+      data.dailyStudy[d] = Math.max(data.dailyStudy[d] || 0, dailyStudy[d]);
+    });
+  }
+
+  const studiedDates = Object.keys(dailyStudy).filter(dateStr => (Number(dailyStudy[dateStr]) || 0) > 0);
+  const dates = studiedDates.map(d => {
+    const parts = d.split('-').map(Number);
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+  });
   dates.sort((a, b) => a - b);
   
   const segments = [];
@@ -2316,7 +2368,7 @@ function getStreakData() {
       const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
       if (diffDays === 1) {
         currentSegment.push(d);
-      } else {
+      } else if (diffDays > 1) {
         segments.push(currentSegment);
         currentSegment = [d];
       }
@@ -2334,7 +2386,6 @@ function getStreakData() {
     });
   });
   
-  const todayStr = getLocalDateString();
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayStr = getLocalDateString(yesterday);
@@ -2352,11 +2403,9 @@ function getStreakData() {
     currentStreakVal = activeSegment.length;
   }
   
-  const finalStreak = currentStreakVal > 3 ? currentStreakVal : 0;
-  
   return {
     dateToSegmentLength,
-    currentStreak: finalStreak,
+    currentStreak: currentStreakVal,
     actualStreakLength: currentStreakVal
   };
 }
