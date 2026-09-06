@@ -5247,6 +5247,12 @@ function renderHeatmap() {
   const container = el("heatmapContainer");
   if (!container) return;
   container.innerHTML = "";
+  if (!container.classList.contains("heatmap-months-container")) {
+    container.classList.add("heatmap-months-container");
+  }
+
+  const monthsRow = el("heatmapMonthsRow");
+  if (monthsRow) monthsRow.innerHTML = "";
 
   if (!data) return;
   if (!data.history || typeof data.history !== "object" || Array.isArray(data.history)) {
@@ -5257,71 +5263,105 @@ function renderHeatmap() {
   const todayStr = getLocalDateString(today);
 
   // Daily flashcard goal to calculate level 1-4 thresholds
-  const goal = Number((data.settings && data.settings.dailyFlashcardGoal) || data.flashcardsGoal || 50);
-  const effectiveGoal = goal > 0 ? goal : 50;
+  const dailyGoal = Number((data.settings && data.settings.dailyFlashcardGoal) || data.flashcardsGoal || 50) || 50;
 
-  // Month labels positioned over first column of each month
-  const monthsRow = el("heatmapMonthsRow");
-  if (monthsRow) {
-    monthsRow.innerHTML = "";
-    let lastMonth = null;
-    for (let i = 0; i < 90; i++) {
-      const col = Math.floor(i / 7);
-      const d = new Date(today);
-      d.setDate(today.getDate() - (89 - i));
-      const monthName = d.toLocaleDateString("en-US", { month: "short" });
-      if (monthName !== lastMonth) {
-        lastMonth = monthName;
-        const span = document.createElement("span");
-        span.textContent = monthName;
-        span.style.position = "absolute";
-        span.style.left = `${col * (20 + 5)}px`;
-        monthsRow.appendChild(span);
-      }
-    }
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth();
+
+  // 3 distinct month blocks: past 2 full months + current month
+  const monthConfigs = [];
+  for (let offset = 2; offset >= 0; offset--) {
+    const mDate = new Date(currentYear, currentMonth - offset, 1);
+    monthConfigs.push({
+      year: mDate.getFullYear(),
+      month: mDate.getMonth(),
+      monthName: mDate.toLocaleDateString("en-US", { month: "long" })
+    });
   }
 
-  const fragment = document.createDocumentFragment();
+  const weekdays = ["M", "T", "W", "T", "F", "S", "S"];
 
-  // Generate array of last 90 days (from 89 days ago up to today)
-  for (let i = 89; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - i);
-    const dateStr = getLocalDateString(d);
+  monthConfigs.forEach(({ year, month, monthName }) => {
+    const monthBlock = document.createElement("div");
+    monthBlock.className = "heatmap-month-block";
 
-    let count = 0;
-    if (dateStr === todayStr) {
-      count = ((data.dailyStats && data.dailyStats.newCardsStudiedToday) || 0) +
-              ((data.dailyStats && data.dailyStats.reviewsStudiedToday) || 0);
-    } else {
-      count = Number(data.history[dateStr]) || 0;
+    const titleEl = document.createElement("div");
+    titleEl.className = "heatmap-month-title";
+    titleEl.textContent = monthName;
+    monthBlock.appendChild(titleEl);
+
+    const weekdaysEl = document.createElement("div");
+    weekdaysEl.className = "heatmap-weekdays";
+    weekdays.forEach(w => {
+      const wSpan = document.createElement("span");
+      wSpan.textContent = w;
+      weekdaysEl.appendChild(wSpan);
+    });
+    monthBlock.appendChild(weekdaysEl);
+
+    const gridEl = document.createElement("div");
+    gridEl.className = "heatmap-month-grid";
+
+    // First day of month (Monday = 0, Sunday = 6)
+    const firstDayDate = new Date(year, month, 1);
+    const startDayIndex = (firstDayDate.getDay() + 6) % 7;
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    // Spacers for days before the 1st of the month
+    for (let s = 0; s < startDayIndex; s++) {
+      const spacer = document.createElement("div");
+      spacer.className = "heatmap-square spacer";
+      gridEl.appendChild(spacer);
     }
 
-    const square = document.createElement("div");
-    square.className = "heatmap-square";
-    square.setAttribute("data-date", dateStr);
-    square.setAttribute("data-count", count);
+    // Days 1..daysInMonth
+    for (let day = 1; day <= daysInMonth; day++) {
+      const d = new Date(year, month, day);
+      const dateStr = getLocalDateString(d);
 
-    // Apply level-1 through level-4 based on user's dailyFlashcardGoal
-    if (count > 0) {
-      const ratio = count / effectiveGoal;
-      if (ratio >= 1.0) {
-        square.classList.add("level-4");
-      } else if (ratio >= 0.5) {
-        square.classList.add("level-3");
-      } else if (ratio >= 0.25) {
-        square.classList.add("level-2");
+      let count = 0;
+      if (dateStr === todayStr) {
+        count = ((data.dailyStats && data.dailyStats.newCardsStudiedToday) || 0) +
+                ((data.dailyStats && data.dailyStats.reviewsStudiedToday) || 0);
+      } else if (dateStr < todayStr) {
+        count = Number(data.history[dateStr]) || 0;
       } else {
-        square.classList.add("level-1");
+        count = 0;
       }
+
+      const square = document.createElement("div");
+      square.className = "heatmap-square";
+      square.setAttribute("data-date", dateStr);
+      square.setAttribute("data-count", count);
+
+      // Goal Percentage Intensity Levels:
+      // Level 0 (0%): Empty / dark base square (count === 0)
+      // Level 1 (1% – 49%): Light emerald tint (opacity: 0.35)
+      // Level 2 (50% – 74%): Medium emerald (opacity: 0.60)
+      // Level 3 (75% – 99%): Strong emerald (opacity: 0.85)
+      // Level 4 (100%+): Solid glowing emerald (#10B981)
+      if (count > 0) {
+        const ratio = count / dailyGoal;
+        if (ratio >= 1.0) {
+          square.classList.add("level-4");
+        } else if (ratio >= 0.75) {
+          square.classList.add("level-3");
+        } else if (ratio >= 0.50) {
+          square.classList.add("level-2");
+        } else {
+          square.classList.add("level-1");
+        }
+      }
+
+      const pct = Math.round((count / dailyGoal) * 100);
+      square.title = `${dateStr}: ${count}/${dailyGoal} cards (${pct}%)`;
+
+      gridEl.appendChild(square);
     }
 
-    square.title = `${dateStr}: ${count} cards studied`;
-
-    fragment.appendChild(square);
-  }
-
-  container.appendChild(fragment);
+    monthBlock.appendChild(gridEl);
+    container.appendChild(monthBlock);
+  });
 }
 window.renderHeatmap = renderHeatmap;
 

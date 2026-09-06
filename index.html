@@ -470,32 +470,18 @@
               <!-- Flashcard Consistency Heatmap (Last 90 Days) -->
               <article class="panel chart-card" style="padding: 18px; display: flex; flex-direction: column; gap: 12px; grid-column: 1 / -1;">
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-                  <div class="panel-kicker" style="margin-bottom: 0;">Flashcard Consistency Heatmap (Last 90 Days)</div>
+                  <div class="panel-kicker" style="margin-bottom: 0;">Flashcard Consistency Heatmap</div>
                   <div style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted);">
-                    <span>Less active</span>
-                    <div class="heatmap-square"></div>
-                    <div class="heatmap-square level-1"></div>
-                    <div class="heatmap-square level-2"></div>
-                    <div class="heatmap-square level-3"></div>
-                    <div class="heatmap-square level-4"></div>
-                    <span>More active</span>
+                    <span>0%</span>
+                    <div class="heatmap-square" style="width: 14px; height: 14px;"></div>
+                    <div class="heatmap-square level-1" style="width: 14px; height: 14px;"></div>
+                    <div class="heatmap-square level-2" style="width: 14px; height: 14px;"></div>
+                    <div class="heatmap-square level-3" style="width: 14px; height: 14px;"></div>
+                    <div class="heatmap-square level-4" style="width: 14px; height: 14px;"></div>
+                    <span>100%+</span>
                   </div>
                 </div>
-                <div class="heatmap-wrapper">
-                  <div id="heatmapMonthsRow" class="heatmap-months-row"></div>
-                  <div class="heatmap-body">
-                    <div class="heatmap-day-labels">
-                      <span></span>
-                      <span>M</span>
-                      <span></span>
-                      <span>W</span>
-                      <span></span>
-                      <span>F</span>
-                      <span></span>
-                    </div>
-                    <div id="heatmapContainer" class="heatmap-grid"></div>
-                  </div>
-                </div>
+                <div id="heatmapContainer" class="heatmap-months-container"></div>
               </article>
             </div>
 
