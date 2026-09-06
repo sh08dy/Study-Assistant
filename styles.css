@@ -5,6 +5,7 @@
   --panel-2: #171820;
   --line: #272934;
   --muted: #666b92;
+  --text-muted: var(--muted);
   --text: #f0f1fb;
   --soft: #c8cae0;
   --purple: #7c67ff;
@@ -2477,9 +2478,12 @@ body.notes-focus-active .workspace {
 .heatmap-wrapper {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   overflow-x: auto;
-  padding: 8px 0;
+  padding: 12px 0;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
 }
 
 .heatmap-months-row {
@@ -2498,11 +2502,11 @@ body.notes-focus-active .workspace {
 
 .heatmap-day-labels {
   display: grid;
-  grid-template-rows: repeat(7, 12px);
-  gap: 3px;
-  font-size: 9px;
-  color: var(--muted);
-  line-height: 12px;
+  grid-template-rows: repeat(7, 20px);
+  gap: 5px;
+  font-size: 11px;
+  line-height: 20px;
+  color: var(--text-muted);
   width: 16px;
   text-align: center;
   user-select: none;
@@ -2510,16 +2514,16 @@ body.notes-focus-active .workspace {
 
 .heatmap-grid {
   display: grid;
-  grid-template-rows: repeat(7, 12px);
+  grid-template-rows: repeat(7, 20px);
   grid-auto-flow: column;
-  grid-auto-columns: 12px;
-  gap: 3px;
+  grid-auto-columns: 20px;
+  gap: 5px;
 }
 
 .heatmap-square {
-  width: 12px;
-  height: 12px;
-  border-radius: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
   background: rgba(255, 255, 255, 0.05);
   box-sizing: border-box;
   transition: transform 0.15s ease, background 0.15s ease;

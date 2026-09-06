@@ -4585,14 +4585,19 @@ function getCardHealthDistribution() {
       if (typeof ensureCardSRS === "function") ensureCardSRS(c);
       const reps = typeof c.reps === "number" ? c.reps : 0;
       const interval = typeof c.interval === "number" ? c.interval : 0;
-      if (reps === 0 || interval === 0) {
-        ratings.again++;
-      } else if (interval > 0 && interval <= 2) {
-        ratings.hard++;
-      } else if (interval > 2 && interval < 5) {
-        ratings.good++;
-      } else if (interval >= 5) {
-        ratings.easy++;
+
+      // Filter out untouched cards (reps === 0 && interval === 0)
+      // Only evaluate cards the user has actually studied at least once (reps > 0)
+      if (reps > 0 || (Boolean(c.lastReviewed) && interval === 0)) {
+        if (interval === 0) {
+          ratings.again++;
+        } else if (interval > 0 && interval <= 2) {
+          ratings.hard++;
+        } else if (interval > 2 && interval < 5) {
+          ratings.good++;
+        } else if (interval >= 5) {
+          ratings.easy++;
+        }
       }
     });
   }
@@ -5005,9 +5010,9 @@ function renderAnkiRatingsDonut(precomputedRatings) {
       const segmentsGroup = existingWrapper.querySelector(".donut-segments-group");
       const legendEl = existingWrapper.querySelector(".donut-legend-container");
       if (titleEl) titleEl.textContent = "0";
-      if (subEl) subEl.textContent = "Cards";
+      if (subEl) subEl.textContent = "Studied Cards";
       if (segmentsGroup) segmentsGroup.innerHTML = "";
-      if (legendEl) legendEl.innerHTML = `<span style="color:var(--muted); font-size:12px;">No flashcards found</span>`;
+      if (legendEl) legendEl.innerHTML = `<span style="color:var(--muted); font-size:12px;">No cards studied yet</span>`;
       return;
     }
     container.innerHTML = `
@@ -5016,10 +5021,10 @@ function renderAnkiRatingsDonut(precomputedRatings) {
           <circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="var(--panel-2)" stroke-width="${strokeWidth}" />
           <g class="donut-segments-group"></g>
           <text x="${center}" y="${center + 5}" class="donut-label-title">0</text>
-          <text x="${center}" y="${center + 20}" class="donut-label-sub">Cards</text>
+          <text x="${center}" y="${center + 20}" class="donut-label-sub">Studied Cards</text>
         </svg>
         <div class="donut-legend-container" style="display:flex; flex-direction:column; gap:8px; font-size:11px; margin-left: 20px;">
-          <span style="color:var(--muted); font-size:12px;">No flashcards found</span>
+          <span style="color:var(--muted); font-size:12px;">No cards studied yet</span>
         </div>
       </div>
     `;
@@ -5027,10 +5032,10 @@ function renderAnkiRatingsDonut(precomputedRatings) {
   }
 
   const allCategories = [
-    { color: "var(--mint)", count: easy, label: "Easy" },
+    { color: "var(--mint)", count: easy, label: "Easy / Mastered" },
     { color: "var(--purple)", count: good, label: "Good" },
     { color: "var(--amber)", count: hard, label: "Hard" },
-    { color: "var(--red)", count: again, label: "Again" }
+    { color: "var(--red)", count: again, label: "Again / Learning" }
   ];
 
   const segments = allCategories.filter(s => s.count > 0);
@@ -5056,7 +5061,7 @@ function renderAnkiRatingsDonut(precomputedRatings) {
   allCategories.forEach(seg => {
     const pct = total > 0 ? Math.round((seg.count / total) * 100) : 0;
     legendHtml += `
-      <div style="display:flex; flex-direction:column; gap:3px; min-width:130px;">
+      <div style="display:flex; flex-direction:column; gap:3px; min-width:140px;">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
           <div style="display:flex; align-items:center; gap:6px;">
             <div style="width:10px; height:10px; background:${seg.color}; border-radius:50%;"></div>
@@ -5082,7 +5087,7 @@ function renderAnkiRatingsDonut(precomputedRatings) {
     const legendEl = existingWrapper.querySelector(".donut-legend-container");
     if (titleEl && segmentsGroup && legendEl) {
       titleEl.textContent = total;
-      if (subEl) subEl.textContent = "Cards";
+      if (subEl) subEl.textContent = "Studied Cards";
       segmentsGroup.innerHTML = circlesHtml;
       legendEl.innerHTML = legendHtml;
       return;
@@ -5095,7 +5100,7 @@ function renderAnkiRatingsDonut(precomputedRatings) {
         <circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="${strokeWidth}" />
         <g class="donut-segments-group">${circlesHtml}</g>
         <text x="${center}" y="${center - 2}" class="donut-label-title">${total}</text>
-        <text x="${center}" y="${center + 14}" class="donut-label-sub">Cards</text>
+        <text x="${center}" y="${center + 14}" class="donut-label-sub">Studied Cards</text>
       </svg>
       <div class="donut-legend-container" style="display:flex; flex-direction:column; gap:8px; font-size:11px; margin-left: 20px;">
         ${legendHtml}
@@ -5270,7 +5275,7 @@ function renderHeatmap() {
         const span = document.createElement("span");
         span.textContent = monthName;
         span.style.position = "absolute";
-        span.style.left = `${col * 15}px`;
+        span.style.left = `${col * (20 + 5)}px`;
         monthsRow.appendChild(span);
       }
     }
@@ -5311,8 +5316,7 @@ function renderHeatmap() {
       }
     }
 
-    const formattedDate = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-    square.title = `${count} cards studied on ${formattedDate}`;
+    square.title = `${dateStr}: ${count} cards studied`;
 
     fragment.appendChild(square);
   }
