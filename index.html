@@ -188,6 +188,14 @@
                 <button id="playTimer" class="main-play" type="button" title="Start or pause">Ⅱ</button>
                 <button id="skipTimer" class="round-button" type="button" title="Skip">▷</button>
               </div>
+              <div class="audio-controls">
+                <button id="toggleAudioBtn" class="icon-btn" type="button" title="Toggle Ambient Audio">🎵</button>
+                <select id="ambientTrack" class="styled-select">
+                  <option value="https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3">Lofi Beats</option>
+                  <option value="https://cdn.pixabay.com/download/audio/2022/03/15/audio_c8b8175bdf.mp3">Brown Noise</option>
+                </select>
+                <audio id="ambientPlayer" loop></audio>
+              </div>
               <div id="sessionDots" class="session-dots"></div>
               <p id="sessionLabel">Session 3 of 4</p>
 
@@ -474,6 +482,25 @@
                     <div style="width: 10px; height: 10px; background: var(--purple); border-radius: 2px;"></div>
                     <span>More active</span>
                   </div>
+                </div>
+              </article>
+
+              <!-- Flashcard Consistency Heatmap (Last 90 Days) -->
+              <article class="panel chart-card" style="padding: 18px; display: flex; flex-direction: column; gap: 12px; grid-column: 1 / -1;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                  <div class="panel-kicker" style="margin-bottom: 0;">Flashcard Consistency Heatmap (Last 90 Days)</div>
+                  <div style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted);">
+                    <span>Less active</span>
+                    <div class="heatmap-square"></div>
+                    <div class="heatmap-square level-1"></div>
+                    <div class="heatmap-square level-2"></div>
+                    <div class="heatmap-square level-3"></div>
+                    <div class="heatmap-square level-4"></div>
+                    <span>More active</span>
+                  </div>
+                </div>
+                <div style="overflow-x: auto; padding: 4px 0;">
+                  <div id="heatmapContainer" class="heatmap-grid"></div>
                 </div>
               </article>
             </div>

@@ -250,6 +250,26 @@ function getDeck(deckName) {
   };
 }
 
+function checkDailyStatsRollover(todayStr = new Date().toLocaleDateString('en-CA')) {
+  if (!data) return;
+  if (!data.history || typeof data.history !== 'object' || Array.isArray(data.history)) {
+    data.history = {};
+  }
+  if (!data.dailyStats) {
+    data.dailyStats = { lastStudyDate: todayStr, newCardsStudiedToday: 0, reviewsStudiedToday: 0 };
+    return;
+  }
+  const previousDate = data.dailyStats.lastStudyDate;
+  const totalStudied = (data.dailyStats.newCardsStudiedToday || 0) + (data.dailyStats.reviewsStudiedToday || 0);
+  if (previousDate && previousDate !== todayStr) {
+    data.history[previousDate] = totalStudied;
+    data.dailyStats.lastStudyDate = todayStr;
+    data.dailyStats.newCardsStudiedToday = 0;
+    data.dailyStats.reviewsStudiedToday = 0;
+  }
+}
+window.checkDailyStatsRollover = checkDailyStatsRollover;
+
 function getDailyRemainingLimits() {
   const todayStr = new Date().toLocaleDateString('en-CA');
   if (!data) return { newRemaining: 50, reviewRemaining: 200 };
@@ -259,11 +279,7 @@ function getDailyRemainingLimits() {
   if (!data.settings) {
     data.settings = { maxNewPerDay: 50, maxReviewsPerDay: 200 };
   }
-  if (data.dailyStats.lastStudyDate !== todayStr) {
-    data.dailyStats.lastStudyDate = todayStr;
-    data.dailyStats.newCardsStudiedToday = 0;
-    data.dailyStats.reviewsStudiedToday = 0;
-  }
+  checkDailyStatsRollover(todayStr);
   let maxNew = typeof data.settings.maxNewPerDay === 'number' ? data.settings.maxNewPerDay : 50;
   if (currentStudyDeck) {
     const deck = getDeck(currentStudyDeck);
@@ -285,13 +301,7 @@ function getDailyRemainingLimits() {
 
 function updateDailyLimitBadge() {
   const todayStr = new Date().toLocaleDateString('en-CA');
-  if (data && data.dailyStats) {
-    if (data.dailyStats.lastStudyDate !== todayStr) {
-      data.dailyStats.lastStudyDate = todayStr;
-      data.dailyStats.newCardsStudiedToday = 0;
-      data.dailyStats.reviewsStudiedToday = 0;
-    }
-  }
+  checkDailyStatsRollover(todayStr);
   const progress = data && data.dailyStats 
     ? ((data.dailyStats.newCardsStudiedToday || 0) + (data.dailyStats.reviewsStudiedToday || 0)) 
     : 0;
@@ -413,6 +423,7 @@ const defaultData = () => ({
     newCardsStudiedToday: 0,
     reviewsStudiedToday: 0
   },
+  history: {},
   deckSettings: {},
   calendarEvents: [],
   targetExam: {
@@ -2137,6 +2148,12 @@ function renderStats() {
       statIcon.textContent = isFireStreak ? "🔥" : "♨";
     }
   }
+
+  try {
+    renderHeatmap();
+  } catch (e) {
+    console.error("Error in renderHeatmap:", e);
+  }
 }
 
 function getTimerDuration(mode) {
@@ -2187,7 +2204,123 @@ function renderTimer() {
   if (autoStartToggle) {
     autoStartToggle.checked = !!(data && data.autoStartIntervals);
   }
+  syncAmbientAudio();
 }
+
+let ambientAudioUserPaused = false;
+
+function updateAmbientAudioUI() {
+  const player = el("ambientPlayer");
+  const btn = el("toggleAudioBtn");
+  if (player && btn) {
+    const isPlaying = !player.paused;
+    btn.classList.toggle("active", isPlaying);
+    btn.title = isPlaying ? "Pause Ambient Audio" : "Play Ambient Audio";
+  }
+}
+
+function syncAmbientAudio() {
+  const player = el("ambientPlayer");
+  const trackSelect = el("ambientTrack");
+  if (!player) return;
+
+  if (trackSelect && trackSelect.value && player.src !== trackSelect.value) {
+    player.src = trackSelect.value;
+  }
+
+  const isFocusing = !!(data && data.timerRunning && data.timerMode === "focus");
+  if (isFocusing) {
+    if (!ambientAudioUserPaused && player.paused) {
+      const playPromise = player.play();
+      if (playPromise && typeof playPromise.catch === "function") {
+        playPromise.catch((err) => {
+          console.log("Ambient audio autoplay deferred:", err);
+        });
+      }
+    }
+  } else {
+    if (!player.paused) {
+      player.pause();
+    }
+  }
+  updateAmbientAudioUI();
+}
+
+function initAmbientAudio() {
+  const player = el("ambientPlayer");
+  const trackSelect = el("ambientTrack");
+  const toggleBtn = el("toggleAudioBtn");
+
+  if (trackSelect && player) {
+    if (trackSelect.value && !player.src) {
+      player.src = trackSelect.value;
+    }
+    trackSelect.addEventListener("change", () => {
+      const wasPlaying = !player.paused;
+      player.src = trackSelect.value;
+      if (wasPlaying || (data && data.timerRunning && data.timerMode === "focus" && !ambientAudioUserPaused)) {
+        const playPromise = player.play();
+        if (playPromise && typeof playPromise.catch === "function") {
+          playPromise.catch((err) => console.log("Ambient audio track switch play error:", err));
+        }
+      }
+      updateAmbientAudioUI();
+    });
+  }
+
+  if (toggleBtn && player) {
+    toggleBtn.addEventListener("click", () => {
+      if (trackSelect && trackSelect.value && !player.src) {
+        player.src = trackSelect.value;
+      }
+      if (player.paused) {
+        ambientAudioUserPaused = false;
+        const playPromise = player.play();
+        if (playPromise && typeof playPromise.catch === "function") {
+          playPromise.catch((err) => console.log("Ambient audio manual play error:", err));
+        }
+      } else {
+        ambientAudioUserPaused = true;
+        player.pause();
+      }
+      updateAmbientAudioUI();
+    });
+
+    player.addEventListener("play", updateAmbientAudioUI);
+    player.addEventListener("pause", updateAmbientAudioUI);
+  }
+
+  updateAmbientAudioUI();
+}
+
+function pauseTimer() {
+  if (data && data.timerRunning) {
+    data.timerRunning = false;
+    resetDocumentTitle();
+    saveUser();
+    renderTimer();
+  }
+  syncAmbientAudio();
+}
+
+function resetTimer() {
+  if (data) {
+    data.timerRemaining = getTimerDuration(data.timerMode);
+    data.timerRunning = false;
+    data.timerStartedAt = null;
+    resetDocumentTitle();
+    saveUser();
+    renderTimer();
+  }
+  ambientAudioUserPaused = false;
+  syncAmbientAudio();
+}
+
+window.initAmbientAudio = initAmbientAudio;
+window.syncAmbientAudio = syncAmbientAudio;
+window.updateAmbientAudioUI = updateAmbientAudioUI;
+window.pauseTimer = pauseTimer;
+window.resetTimer = resetTimer;
 
 function getSubjectStudiedMinutes(subjectName) {
   if (!userStudySessions || userStudySessions.length === 0) return 0;
@@ -3154,12 +3287,16 @@ function normalizeData(savedData) {
   normalized.settings.maxReviewsPerDay = typeof normalized.settings.maxReviewsPerDay === 'number' ? normalized.settings.maxReviewsPerDay : 200;
   normalized.settings.dailyFlashcardGoal = typeof normalized.settings.dailyFlashcardGoal === 'number' ? normalized.settings.dailyFlashcardGoal : (normalized.flashcardsGoal || 50);
 
+  normalized.history = (typeof normalized.history === 'object' && normalized.history !== null && !Array.isArray(normalized.history)) ? normalized.history : {};
   normalized.dailyStats = normalized.dailyStats || {};
   normalized.dailyStats.lastStudyDate = normalized.dailyStats.lastStudyDate || todayStr;
   normalized.dailyStats.newCardsStudiedToday = typeof normalized.dailyStats.newCardsStudiedToday === 'number' ? normalized.dailyStats.newCardsStudiedToday : 0;
   normalized.dailyStats.reviewsStudiedToday = typeof normalized.dailyStats.reviewsStudiedToday === 'number' ? normalized.dailyStats.reviewsStudiedToday : 0;
 
-  if (normalized.dailyStats.lastStudyDate !== todayStr) {
+  const previousDate = normalized.dailyStats.lastStudyDate;
+  const totalStudied = normalized.dailyStats.newCardsStudiedToday + normalized.dailyStats.reviewsStudiedToday;
+  if (previousDate && previousDate !== todayStr) {
+    normalized.history[previousDate] = totalStudied;
     normalized.dailyStats.lastStudyDate = todayStr;
     normalized.dailyStats.newCardsStudiedToday = 0;
     normalized.dailyStats.reviewsStudiedToday = 0;
@@ -4657,6 +4794,7 @@ async function renderAnalyticsTab() {
 
   // 5. Render Study Frequency Heatmap
   renderActivityHeatmap();
+  renderHeatmap();
 
   // 5.5. Render Subject Tag Study Distribution
   renderSubjectStudyDistribution(subjectMinsMap);
@@ -5136,6 +5274,68 @@ function renderActivityHeatmap() {
   }
   container.appendChild(fragment);
 }
+
+function renderHeatmap() {
+  const container = el("heatmapContainer");
+  if (!container) return;
+  container.innerHTML = "";
+
+  if (!data) return;
+  if (!data.history || typeof data.history !== "object" || Array.isArray(data.history)) {
+    data.history = {};
+  }
+
+  const today = new Date();
+  const todayStr = getLocalDateString(today);
+
+  // Daily flashcard goal to calculate level 1-4 thresholds
+  const goal = Number((data.settings && data.settings.dailyFlashcardGoal) || data.flashcardsGoal || 50);
+  const effectiveGoal = goal > 0 ? goal : 50;
+
+  const fragment = document.createDocumentFragment();
+
+  // Generate array of last 90 days (from 89 days ago up to today)
+  for (let i = 89; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(today.getDate() - i);
+    const dateStr = getLocalDateString(d);
+
+    let count = 0;
+    if (dateStr === todayStr) {
+      count = ((data.dailyStats && data.dailyStats.newCardsStudiedToday) || 0) +
+              ((data.dailyStats && data.dailyStats.reviewsStudiedToday) || 0);
+    } else {
+      count = Number(data.history[dateStr]) || 0;
+    }
+
+    const square = document.createElement("div");
+    square.className = "heatmap-square";
+    square.setAttribute("data-date", dateStr);
+    square.setAttribute("data-count", count);
+
+    // Apply level-1 through level-4 based on user's dailyFlashcardGoal
+    if (count > 0) {
+      const ratio = count / effectiveGoal;
+      if (ratio >= 1.0) {
+        square.classList.add("level-4");
+      } else if (ratio >= 0.5) {
+        square.classList.add("level-3");
+      } else if (ratio >= 0.25) {
+        square.classList.add("level-2");
+      } else {
+        square.classList.add("level-1");
+      }
+    }
+
+    const formattedDate = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    square.title = `${count} cards studied on ${formattedDate}`;
+
+    fragment.appendChild(square);
+  }
+
+  container.appendChild(fragment);
+}
+window.renderHeatmap = renderHeatmap;
 
 function checkAchievements(totalSeconds, totalReviews, activeDays) {
   const isDeepWorker = totalSeconds >= 3600;
@@ -6691,13 +6891,7 @@ function renderFlashcardsTab() {
   if (!currentStudyDeck) {
     if (closeBtn) closeBtn.classList.add("hidden");
     const todayStr = new Date().toLocaleDateString('en-CA');
-    if (data && data.dailyStats) {
-      if (data.dailyStats.lastStudyDate !== todayStr) {
-        data.dailyStats.lastStudyDate = todayStr;
-        data.dailyStats.newCardsStudiedToday = 0;
-        data.dailyStats.reviewsStudiedToday = 0;
-      }
-    }
+    checkDailyStatsRollover(todayStr);
     const progress = data && data.dailyStats 
       ? ((data.dailyStats.newCardsStudiedToday || 0) + (data.dailyStats.reviewsStudiedToday || 0)) 
       : 0;
@@ -7012,11 +7206,7 @@ function buildStudyQueue(deckName) {
       maxReviewsPerDay: 200
     };
   }
-  if (data.dailyStats.lastStudyDate !== todayStr) {
-    data.dailyStats.lastStudyDate = todayStr;
-    data.dailyStats.newCardsStudiedToday = 0;
-    data.dailyStats.reviewsStudiedToday = 0;
-  }
+  checkDailyStatsRollover(todayStr);
 
   // 2. Filter due cards (including 30-minute learn-ahead limit)
   const now = Date.now();
@@ -7143,13 +7333,7 @@ function renderActiveCard() {
   }
   
   const todayStr = new Date().toLocaleDateString('en-CA');
-  if (data && data.dailyStats) {
-    if (data.dailyStats.lastStudyDate !== todayStr) {
-      data.dailyStats.lastStudyDate = todayStr;
-      data.dailyStats.newCardsStudiedToday = 0;
-      data.dailyStats.reviewsStudiedToday = 0;
-    }
-  }
+  checkDailyStatsRollover(todayStr);
   const progress = data && data.dailyStats 
     ? ((data.dailyStats.newCardsStudiedToday || 0) + (data.dailyStats.reviewsStudiedToday || 0)) 
     : 0;
@@ -7298,14 +7482,7 @@ function rateCard(rating) {
   const card = data.currentStudyQueue[0] || (currentStudyCards && currentStudyCards[currentCardIndex]);
   if (card) {
     const todayStr = new Date().toLocaleDateString('en-CA');
-    if (!data.dailyStats) {
-      data.dailyStats = { lastStudyDate: todayStr, newCardsStudiedToday: 0, reviewsStudiedToday: 0 };
-    }
-    if (data.dailyStats.lastStudyDate !== todayStr) {
-      data.dailyStats.lastStudyDate = todayStr;
-      data.dailyStats.newCardsStudiedToday = 0;
-      data.dailyStats.reviewsStudiedToday = 0;
-    }
+    checkDailyStatsRollover(todayStr);
 
     // Track stats BEFORE mutating
     const isNew = (card.reps || 0) === 0;
@@ -7568,6 +7745,7 @@ window.getImageZoomState = () => ({
 
 function bindEvents() {
   initImageZoomViewer();
+  initAmbientAudio();
   el("loginTab").addEventListener("click", () => setAuthMode("login"));
   el("signupTab").addEventListener("click", () => setAuthMode("signup"));
   el("authForm").addEventListener("submit", handleAuth);
@@ -7879,6 +8057,9 @@ function bindEvents() {
       data.timerStartedAt = data.timerStartedAt || Date.now();
       playTone("play");
       updateTimerTitle();
+      if (data.timerMode === "focus") {
+        ambientAudioUserPaused = false;
+      }
     } else {
       resetDocumentTitle();
     }
@@ -7887,12 +8068,7 @@ function bindEvents() {
   });
 
   el("resetTimer").addEventListener("click", () => {
-    data.timerRemaining = getTimerDuration(data.timerMode);
-    data.timerRunning = false;
-    data.timerStartedAt = null;
-    resetDocumentTitle();
-    saveUser();
-    renderTimer();
+    resetTimer();
   });
 
   const autoStartToggle = el("autoStartIntervalsToggle");
