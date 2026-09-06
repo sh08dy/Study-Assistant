@@ -720,16 +720,23 @@ async function fetchUserEvents() {
     }
 
     if (data) {
-      data.calendarEvents = (rows || []).map((row) => ({
-        id: String(row.id),
-        supabaseId: row.id,
-        title: row.title || "Untitled Event",
-        date: row.date,
-        category: row.category || "General",
-        color: row.color || "#7c67ff",
-        startTime: "09:00",
-        endTime: "10:00"
-      }));
+      data.calendarEvents = (rows || []).map((row) => {
+        let cleanDate = row.date;
+        if (cleanDate && cleanDate.includes("T")) {
+          const [y, m, d] = cleanDate.split("T")[0].split("-").map(Number);
+          cleanDate = getLocalDateString(new Date(y, m - 1, d));
+        }
+        return {
+          id: String(row.id),
+          supabaseId: row.id,
+          title: row.title || "Untitled Event",
+          date: cleanDate,
+          category: row.category || "General",
+          color: row.color || "#7c67ff",
+          startTime: row.startTime || "09:00",
+          endTime: row.endTime || "10:00"
+        };
+      });
 
       saveUser();
       if (typeof renderCalendarTab === "function") renderCalendarTab();
@@ -1525,6 +1532,33 @@ async function logout() {
   if (authEl) authEl.classList.remove("hidden");
   setMessage("");
 }
+
+window.devWipeAccount = async () => {
+  if (!currentUser) return console.error("No active user");
+  console.log("Wiping account data for:", currentUser.id);
+  
+  // 1. Delete all Supabase rows for this user
+  if (typeof supabaseClient !== 'undefined' && supabaseClient) {
+    try {
+      await supabaseClient.from('study_sessions').delete().eq('user_id', currentUser.id);
+      await supabaseClient.from('calendar_events').delete().eq('user_id', currentUser.id);
+      await supabaseClient.from('events').delete().eq('user_id', currentUser.id);
+      await supabaseClient.from('todos').delete().eq('user_id', currentUser.id);
+    } catch (err) {
+      console.warn("devWipeAccount Supabase delete notice:", err);
+    }
+  }
+  
+  // 2. Clear local data and cache
+  localStorage.removeItem(getStorageKey());
+  if (typeof defaultData === 'function') data = defaultData();
+  if (typeof invalidateAnalyticsCache === 'function') invalidateAnalyticsCache();
+  
+  // 3. Reload page
+  if (typeof window !== 'undefined' && window.location && typeof window.location.reload === 'function') {
+    window.location.reload();
+  }
+};
 
 function renderAll() {
   renderDate();
@@ -5192,7 +5226,7 @@ function renderMiniCalendar() {
   const prevMonthTotalDays = new Date(year, month, 0).getDate();
 
   const todayStr = getLocalDateString();
-  const activeDateStr = currentCalendarDate.toISOString().split("T")[0];
+  const activeDateStr = getLocalDateString(currentCalendarDate);
 
   // Draw previous month padding days
   for (let i = firstDay - 1; i >= 0; i--) {
@@ -5216,7 +5250,7 @@ function renderMiniCalendar() {
     cell.textContent = day;
     
     const cellDate = new Date(year, month, day);
-    const dateStr = cellDate.toISOString().split("T")[0];
+    const dateStr = getLocalDateString(cellDate);
 
     if (dateStr === todayStr) {
       cell.classList.add("today-highlight");
@@ -5263,7 +5297,7 @@ function renderMonthView(container, events) {
     cell.innerHTML = `<span class="calendar-day-number">${day}</span>`;
     
     const targetDate = new Date(year, month - 1, day);
-    const dateStr = targetDate.toISOString().split("T")[0];
+    const dateStr = getLocalDateString(targetDate);
     cell.addEventListener("click", () => {
       openCreateEventModal(dateStr);
     });
@@ -5276,7 +5310,7 @@ function renderMonthView(container, events) {
     cell.className = "calendar-day-cell";
     
     const cellDate = new Date(year, month, day);
-    const dateStr = cellDate.toISOString().split("T")[0];
+    const dateStr = getLocalDateString(cellDate);
 
     if (dateStr === todayStr) {
       cell.classList.add("today-cell");
@@ -5362,7 +5396,7 @@ function renderWeekView(container, events) {
 
   // For each day column
   weekDates.forEach((colDate) => {
-    const colStr = colDate.toISOString().split("T")[0];
+    const colStr = getLocalDateString(colDate);
     const col = document.createElement("div");
     col.className = "calendar-week-day-column";
     
@@ -5426,7 +5460,7 @@ function renderWeekView(container, events) {
 }
 
 function renderDayView(container, events) {
-  const dateStr = currentCalendarDate.toISOString().split("T")[0];
+  const dateStr = getLocalDateString(currentCalendarDate);
   
   const wrapper = document.createElement("div");
   wrapper.className = "calendar-week-grid";
@@ -5522,13 +5556,17 @@ function renderDayView(container, events) {
 
 function renderAgendaView(container, events) {
   const sorted = [...events].sort((a, b) => {
-    if (a.date !== b.date) return a.date.localeCompare(b.date);
-    return a.startTime.localeCompare(b.startTime);
+    const dateA = a.date ? (a.date.includes("T") ? a.date.split("T")[0] : a.date) : "";
+    const dateB = b.date ? (b.date.includes("T") ? b.date.split("T")[0] : b.date) : "";
+    if (dateA !== dateB) return dateA.localeCompare(dateB);
+    return (a.startTime || "").localeCompare(b.startTime || "");
   });
 
   const upcoming = sorted.filter(e => {
-    const dateSplit = e.date.split("-").map(Number);
-    const eventDate = new Date(dateSplit[0], dateSplit[1] - 1, dateSplit[2]);
+    if (!e.date) return false;
+    const cleanDate = e.date.includes("T") ? e.date.split("T")[0] : e.date;
+    const [y, m, d] = cleanDate.split("-").map(Number);
+    const eventDate = new Date(y, m - 1, d);
     const activeDateCompare = new Date(currentCalendarDate.getFullYear(), currentCalendarDate.getMonth(), 1);
     return eventDate >= activeDateCompare;
   });
@@ -5549,13 +5587,16 @@ function renderAgendaView(container, events) {
 
   const groups = {};
   upcoming.forEach(evt => {
-    if (!groups[evt.date]) groups[evt.date] = [];
-    groups[evt.date].push(evt);
+    const cleanDate = evt.date ? (evt.date.includes("T") ? evt.date.split("T")[0] : evt.date) : "";
+    if (!cleanDate) return;
+    if (!groups[cleanDate]) groups[cleanDate] = [];
+    groups[cleanDate].push(evt);
   });
 
   Object.keys(groups).sort().forEach(dateStr => {
     const dayEvents = groups[dateStr];
-    const dateObj = new Date(dateStr.split("-").map(Number)[0], dateStr.split("-").map(Number)[1] - 1, dateStr.split("-").map(Number)[2]);
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const dateObj = new Date(y, m - 1, d);
 
     const groupNode = document.createElement("div");
     groupNode.className = "calendar-agenda-day-group";
@@ -6741,7 +6782,7 @@ function bindEvents() {
   const createEventBtn = el("createEventBtn");
   if (createEventBtn) {
     createEventBtn.addEventListener("click", () => {
-      openCreateEventModal(new Date().toISOString().split("T")[0]);
+      openCreateEventModal(getLocalDateString());
     });
   }
 
