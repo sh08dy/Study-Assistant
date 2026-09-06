@@ -152,6 +152,10 @@ function calculateNextReview(card, rating) {
       else if (numRating === 3) card.interval = Math.max(1, Math.round(card.interval * card.ease));
       else if (numRating === 4) card.interval = Math.max(1, Math.round(card.interval * card.ease * 1.3));
       
+      // Apply the 5-day hard ceiling
+      const MAX_INTERVAL_DAYS = 5;
+      card.interval = Math.min(card.interval, MAX_INTERVAL_DAYS);
+      
       card.ease = Math.max(1.3, card.ease + (0.1 - (5 - numRating) * (0.08 + (5 - numRating) * 0.02)));
       card.dueDate = Date.now() + (card.interval * ONE_DAY);
     }
@@ -7312,6 +7316,10 @@ function rateCard(rating) {
     }
 
     calculateNextReview(card, numRating);
+    const MAX_INTERVAL_DAYS = 5;
+    if (typeof card.interval === "number") {
+      card.interval = Math.min(card.interval, MAX_INTERVAL_DAYS);
+    }
     card.nextReviewDate = card.dueDate;
     card.lastReviewed = Date.now();
   }
