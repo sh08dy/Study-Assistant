@@ -1823,9 +1823,40 @@ function renderStats() {
   data.streak = currentStreak;
   data.bestStreak = Math.max(data.bestStreak || 0, currentStreak);
   
-  el("streakText").textContent = data.streak;
-  el("topStreak").textContent = data.streak;
-  el("bestStreakText").textContent = `Best: ${data.bestStreak} days`;
+  const streakText = el("streakText");
+  if (streakText) {
+    streakText.textContent = data.streak;
+    streakText.classList.add("streak-number");
+  }
+  const topStreak = el("topStreak");
+  if (topStreak) {
+    topStreak.textContent = data.streak;
+    topStreak.classList.add("streak-number");
+  }
+  const bestStreakText = el("bestStreakText");
+  if (bestStreakText) {
+    bestStreakText.textContent = `Best: ${data.bestStreak} days`;
+  }
+
+  const isFireStreak = data.streak >= 3;
+  const streakBtn = el("streakButton");
+  if (streakBtn) {
+    streakBtn.classList.toggle("streak-fire", isFireStreak);
+    const iconSpan = streakBtn.querySelector(".streak-icon");
+    if (iconSpan) {
+      iconSpan.textContent = isFireStreak ? "🔥" : "♢";
+    }
+  }
+
+  const statCard = document.querySelector('.stat-card[data-stat="streak"]');
+  if (statCard) {
+    statCard.classList.toggle("streak-fire", isFireStreak);
+    const statIcon = statCard.querySelector(".streak-icon") || statCard.querySelector("b");
+    if (statIcon) {
+      statIcon.classList.add("streak-icon");
+      statIcon.textContent = isFireStreak ? "🔥" : "♨";
+    }
+  }
 }
 
 function getTimerDuration(mode) {
@@ -2215,6 +2246,26 @@ function renderStreak() {
   const metricSessionsEl = el("metricSessions");
   if (metricSessionsEl) {
     metricSessionsEl.textContent = totalSessionsAllTime;
+  }
+
+  const isFireStreak = data.streak >= 3;
+  const streakBtn = el("streakButton");
+  if (streakBtn) {
+    streakBtn.classList.toggle("streak-fire", isFireStreak);
+    const iconSpan = streakBtn.querySelector(".streak-icon");
+    if (iconSpan) {
+      iconSpan.textContent = isFireStreak ? "🔥" : "♢";
+    }
+  }
+
+  const statCard = document.querySelector('.stat-card[data-stat="streak"]');
+  if (statCard) {
+    statCard.classList.toggle("streak-fire", isFireStreak);
+    const statIcon = statCard.querySelector(".streak-icon") || statCard.querySelector("b");
+    if (statIcon) {
+      statIcon.classList.add("streak-icon");
+      statIcon.textContent = isFireStreak ? "🔥" : "♨";
+    }
   }
 }
 
@@ -3216,13 +3267,82 @@ function cleanAnkiText(text, imagesMap = {}) {
   return doc.body.innerHTML;
 }
 
-function switchTab(pageName) {
+function switchView(viewId) {
+  if (!viewId) return;
   resetDocumentTitle();
-  const navBtn = document.querySelector(`.nav-item[data-page="${pageName}"]`);
-  if (navBtn) {
-    navBtn.click();
-  }
+  
+  // Normalize target page/view name
+  const pageMap = {
+    "dashboard": "Dashboard",
+    "dashboardpage": "Dashboard",
+    "dashboardview": "Dashboard",
+    "flashcards": "Flashcards",
+    "flashcardspage": "Flashcards",
+    "flashcardsview": "Flashcards",
+    "calendar": "Calendar",
+    "calendarpage": "Calendar",
+    "calendarview": "Calendar",
+    "resources": "Resources",
+    "resourcespage": "Resources",
+    "resourcesview": "Resources",
+    "analytics": "Analytics",
+    "analyticspage": "Analytics",
+    "analyticsview": "Analytics"
+  };
+  const normalizedPage = pageMap[viewId.toLowerCase()] || viewId;
+
+  // 1. Instant tactile feedback: update nav buttons and header title
+  document.querySelectorAll(".nav-item[data-page], .nav-btn").forEach(btn => {
+    const page = btn.dataset.page || btn.dataset.target;
+    btn.classList.toggle("active", page === normalizedPage);
+  });
+
+  const titleEl = el("pageTitle");
+  if (titleEl) titleEl.textContent = normalizedPage;
+
+  // 2. Defer heavy DOM layout reflows to free up the click event
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      // Toggle view containers
+      const containerMap = {
+        "Dashboard": el("dashboardPage") || el("dashboardView"),
+        "Flashcards": el("flashcardsPage") || el("flashcardsView"),
+        "Calendar": el("calendarPage") || el("calendarView"),
+        "Resources": el("resourcesPage") || el("resourcesView"),
+        "Analytics": el("analyticsPage") || el("analyticsView")
+      };
+
+      document.querySelectorAll(".page-view, .view-container").forEach(view => {
+        view.classList.add("hidden");
+      });
+
+      const targetEl = containerMap[normalizedPage];
+      if (targetEl) {
+        targetEl.classList.remove("hidden");
+      }
+
+      // Trigger specific render functions if needed
+      if (normalizedPage === "Dashboard") {
+        renderAll();
+      } else if (normalizedPage === "Flashcards") {
+        renderFlashcardsTab();
+      } else if (normalizedPage === "Calendar") {
+        renderCalendarTab();
+      } else if (normalizedPage === "Resources") {
+        renderSharedResourcesTab();
+        fetchSharedResources();
+      } else if (normalizedPage === "Analytics") {
+        renderAnalyticsTab({ fetchRemote: false });
+      }
+    }, 0);
+  });
 }
+
+function switchTab(pageName) {
+  switchView(pageName);
+}
+window.switchView = switchView;
+window.switchTab = switchTab;
 
 function convertDriveLink(url) {
   const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/id=([a-zA-Z0-9_-]+)/);
@@ -6703,33 +6823,10 @@ function bindEvents() {
     });
   }
 
-  document.querySelectorAll(".nav-item[data-page]").forEach((button) => {
+  document.querySelectorAll(".nav-item[data-page], .nav-btn").forEach((button) => {
     button.addEventListener("click", () => {
-      resetDocumentTitle();
-      document.querySelectorAll(".nav-item").forEach((item) => item.classList.remove("active"));
-      button.classList.add("active");
-      el("pageTitle").textContent = button.dataset.page;
-      
-      const targetPage = button.dataset.page;
-      document.querySelectorAll(".page-view").forEach((page) => page.classList.add("hidden"));
-      
-      if (targetPage === "Dashboard") {
-        el("dashboardPage").classList.remove("hidden");
-        renderAll();
-      } else if (targetPage === "Flashcards") {
-        el("flashcardsPage").classList.remove("hidden");
-        renderFlashcardsTab();
-      } else if (targetPage === "Calendar") {
-        el("calendarPage").classList.remove("hidden");
-        renderCalendarTab();
-      } else if (targetPage === "Resources") {
-        el("resourcesPage").classList.remove("hidden");
-        renderSharedResourcesTab();
-        fetchSharedResources();
-      } else if (targetPage === "Analytics") {
-        el("analyticsPage").classList.remove("hidden");
-        renderAnalyticsTab({ fetchRemote: true });
-      }
+      const targetPage = button.dataset.page || button.dataset.target;
+      switchView(targetPage);
     });
   });
 

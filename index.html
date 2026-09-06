@@ -87,7 +87,7 @@
             </div>
           </div>
           <div class="top-actions">
-            <button id="streakButton" class="pill" type="button">♢ <strong id="topStreak">0</strong> day streak</button>
+            <button id="streakButton" class="pill" type="button"><span class="streak-icon">♢</span> <strong id="topStreak" class="streak-number">0</strong> day streak</button>
             <button id="soundButton" class="icon-pill" type="button" title="Toggle sound">♬</button>
             <button id="logoutButton" class="icon-pill danger" type="button" title="Logout">↳</button>
           </div>
@@ -257,8 +257,8 @@
                 </label>
               </div>
               <div class="stat-card" data-stat="streak">
-                <span>Current streak <b>♨</b></span>
-                <strong><span id="streakText">0</span> <small>days</small></strong>
+                <span>Current streak <b class="streak-icon">♨</b></span>
+                <strong><span id="streakText" class="streak-number">0</span> <small>days</small></strong>
                 <small id="bestStreakText">Best: 0 days</small>
               </div>
             </section>
