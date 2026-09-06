@@ -5268,9 +5268,9 @@ function renderHeatmap() {
   const currentYear = today.getFullYear();
   const currentMonth = today.getMonth();
 
-  // 3 distinct month blocks: past 2 full months + current month
+  // 4 distinct month blocks: past 3 full months + current month
   const monthConfigs = [];
-  for (let offset = 2; offset >= 0; offset--) {
+  for (let offset = 3; offset >= 0; offset--) {
     const mDate = new Date(currentYear, currentMonth - offset, 1);
     monthConfigs.push({
       year: mDate.getFullYear(),
@@ -5283,7 +5283,7 @@ function renderHeatmap() {
 
   monthConfigs.forEach(({ year, month, monthName }) => {
     const monthBlock = document.createElement("div");
-    monthBlock.className = "heatmap-month-block";
+    monthBlock.className = "heatmap-month-block heatmap-month-card";
 
     const titleEl = document.createElement("div");
     titleEl.className = "heatmap-month-title";

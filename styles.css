@@ -2480,22 +2480,23 @@ body.notes-focus-active .workspace {
   flex-wrap: wrap;
   justify-content: space-between;
   align-items: stretch;
-  gap: 24px;
+  gap: 16px;
   width: 100%;
   padding: 12px 0;
   box-sizing: border-box;
 }
 
-.heatmap-month-block {
+.heatmap-month-block,
+.heatmap-month-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  flex: 1 1 240px;
-  max-width: 340px;
+  gap: 8px;
+  flex: 1 1 210px; /* Expands evenly to fill card width */
+  min-width: 190px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 14px;
+  padding: 12px;
   box-sizing: border-box;
 }
 
@@ -2510,7 +2511,7 @@ body.notes-focus-active .workspace {
 .heatmap-weekdays {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
+  gap: 4px;
   text-align: center;
   font-size: 11px;
   font-weight: 600;
@@ -2521,12 +2522,12 @@ body.notes-focus-active .workspace {
 .heatmap-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
+  gap: 4px;
 }
 
 .heatmap-square {
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.05);
   box-sizing: border-box;
