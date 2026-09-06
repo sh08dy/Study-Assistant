@@ -138,6 +138,135 @@ function calculateNextReview(card, rating) {
 window.ensureCardSRS = ensureCardSRS;
 window.calculateNextReview = calculateNextReview;
 
+function calculateDeckPacing(deck) {
+  if (!deck || typeof deck !== "object") return null;
+  if (!deck.examDate) return null;
+
+  // Calculate total days until the exam using local time
+  const dateStr = String(deck.examDate).trim().split("T")[0];
+  const [y, m, d] = dateStr.split("-").map(Number);
+  if (isNaN(y) || isNaN(m) || isNaN(d)) return null;
+
+  const examDateObj = new Date(y, m - 1, d);
+  const now = new Date();
+  const todayObj = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const diffMs = examDateObj.getTime() - todayObj.getTime();
+  const totalDays = Math.round(diffMs / (24 * 60 * 60 * 1000));
+
+  // Subtract deck.pacingBufferDays to get effectiveStudyDays (cap at 1 if < 1)
+  const bufferDays = typeof deck.pacingBufferDays === "number" ? deck.pacingBufferDays : 3;
+  let effectiveStudyDays = totalDays - bufferDays;
+  if (effectiveStudyDays < 1) {
+    effectiveStudyDays = 1;
+  }
+
+  // Count remaining new cards in the deck: deck.cards.filter(c => c.reps === 0).length
+  let cards = [];
+  if (Array.isArray(deck.cards)) {
+    cards = deck.cards;
+  } else if (Array.isArray(deck)) {
+    cards = deck;
+  } else if (deck.name || deck.fullName) {
+    cards = typeof getDeckCards === "function" ? getDeckCards(deck.name || deck.fullName) : [];
+  }
+  if (!deck.cards && Array.isArray(cards)) {
+    deck.cards = cards;
+  }
+
+  const remainingNewCards = cards.filter(c => (c.reps || 0) === 0).length;
+
+  // Calculate required daily new cards: Math.ceil(remainingNewCards / effectiveStudyDays)
+  return Math.ceil(remainingNewCards / effectiveStudyDays);
+}
+
+function getDeck(deckName) {
+  if (!deckName) return null;
+  if (typeof deckName === "object" && deckName !== null) {
+    if (!deckName.cards && Array.isArray(deckName)) {
+      deckName.cards = deckName;
+    }
+    if (typeof deckName.examDate === "undefined") deckName.examDate = null;
+    if (typeof deckName.pacingBufferDays === "undefined") deckName.pacingBufferDays = 3;
+    return deckName;
+  }
+  const raw = (data && data.flashcardDecks) ? data.flashcardDecks[deckName] : null;
+  const meta = (data && data.deckSettings && data.deckSettings[deckName]) || {};
+  if (!raw && !meta) return null;
+
+  let cards = [];
+  if (Array.isArray(raw)) {
+    cards = raw;
+  } else if (raw && Array.isArray(raw.cards)) {
+    cards = raw.cards;
+  } else if (typeof getDeckCards === "function") {
+    cards = getDeckCards(deckName);
+  }
+
+  const examDate = (raw && raw.examDate !== undefined) ? raw.examDate : (meta.examDate !== undefined ? meta.examDate : null);
+  const pacingBufferDays = (raw && typeof raw.pacingBufferDays === "number") ? raw.pacingBufferDays : (typeof meta.pacingBufferDays === "number" ? meta.pacingBufferDays : 3);
+
+  if (Array.isArray(raw)) {
+    raw.cards = raw;
+    raw.examDate = examDate;
+    raw.pacingBufferDays = pacingBufferDays;
+  }
+
+  return {
+    name: deckName,
+    fullName: deckName,
+    cards,
+    examDate,
+    pacingBufferDays
+  };
+}
+
+function getDailyRemainingLimits() {
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  if (!data) return { newRemaining: 50, reviewRemaining: 200 };
+  if (!data.dailyStats) {
+    data.dailyStats = { lastStudyDate: todayStr, newCardsStudiedToday: 0, reviewsStudiedToday: 0 };
+  }
+  if (!data.settings) {
+    data.settings = { maxNewPerDay: 50, maxReviewsPerDay: 200 };
+  }
+  if (data.dailyStats.lastStudyDate !== todayStr) {
+    data.dailyStats.lastStudyDate = todayStr;
+    data.dailyStats.newCardsStudiedToday = 0;
+    data.dailyStats.reviewsStudiedToday = 0;
+  }
+  let maxNew = typeof data.settings.maxNewPerDay === 'number' ? data.settings.maxNewPerDay : 50;
+  if (currentStudyDeck) {
+    const deck = getDeck(currentStudyDeck);
+    if (deck && deck.examDate) {
+      const pacedNew = calculateDeckPacing(deck);
+      if (typeof pacedNew === "number") {
+        maxNew = pacedNew;
+      }
+    }
+  }
+  const maxReviews = typeof data.settings.maxReviewsPerDay === 'number' ? data.settings.maxReviewsPerDay : 200;
+  const newStudied = typeof data.dailyStats.newCardsStudiedToday === 'number' ? data.dailyStats.newCardsStudiedToday : 0;
+  const reviewsStudied = typeof data.dailyStats.reviewsStudiedToday === 'number' ? data.dailyStats.reviewsStudiedToday : 0;
+  return {
+    newRemaining: Math.max(0, maxNew - newStudied),
+    reviewRemaining: Math.max(0, maxReviews - reviewsStudied)
+  };
+}
+
+function updateDailyLimitBadge() {
+  const { newRemaining, reviewRemaining } = getDailyRemainingLimits();
+  const newEl = el("newRemaining");
+  const revEl = el("reviewRemaining");
+  if (newEl) newEl.textContent = String(newRemaining);
+  if (revEl) revEl.textContent = String(reviewRemaining);
+}
+
+window.calculateDeckPacing = calculateDeckPacing;
+window.getDeck = getDeck;
+window.getDailyRemainingLimits = getDailyRemainingLimits;
+window.updateDailyLimitBadge = updateDailyLimitBadge;
+
 const defaultData = () => ({
   studySeconds: 0,
   studyGoal: 360,
@@ -186,6 +315,16 @@ const defaultData = () => ({
   flashcardTotalTime: 0,
   flashcardTotalCount: 0,
   dailyFlashcards: {},
+  settings: {
+    maxNewPerDay: 50,
+    maxReviewsPerDay: 200
+  },
+  dailyStats: {
+    lastStudyDate: new Date().toLocaleDateString('en-CA'),
+    newCardsStudiedToday: 0,
+    reviewsStudiedToday: 0
+  },
+  deckSettings: {},
   calendarEvents: [],
   targetExam: {
     title: "USMLE Step 1 Exam",
@@ -2888,10 +3027,25 @@ function normalizeData(savedData) {
   normalized.lastActiveDate = normalized.lastActiveDate || "";
   normalized.flashcardDecks = normalized.flashcardDecks || {};
   normalized.currentStudyQueue = Array.isArray(normalized.currentStudyQueue) ? normalized.currentStudyQueue : [];
+  normalized.deckSettings = normalized.deckSettings || {};
   if (typeof normalized.flashcardDecks === "object" && normalized.flashcardDecks !== null) {
     Object.keys(normalized.flashcardDecks).forEach(deckName => {
-      if (Array.isArray(normalized.flashcardDecks[deckName])) {
-        normalized.flashcardDecks[deckName].forEach(ensureCardSRS);
+      const d = normalized.flashcardDecks[deckName];
+      normalized.deckSettings[deckName] = normalized.deckSettings[deckName] || { examDate: null, pacingBufferDays: 3 };
+      if (Array.isArray(d)) {
+        d.cards = d;
+        d.examDate = d.examDate !== undefined ? d.examDate : (normalized.deckSettings[deckName].examDate ?? null);
+        d.pacingBufferDays = typeof d.pacingBufferDays === "number" ? d.pacingBufferDays : (normalized.deckSettings[deckName].pacingBufferDays ?? 3);
+        normalized.deckSettings[deckName].examDate = d.examDate;
+        normalized.deckSettings[deckName].pacingBufferDays = d.pacingBufferDays;
+        d.forEach(ensureCardSRS);
+      } else if (d && typeof d === "object") {
+        d.cards = Array.isArray(d.cards) ? d.cards : [];
+        d.examDate = d.examDate !== undefined ? d.examDate : (normalized.deckSettings[deckName].examDate ?? null);
+        d.pacingBufferDays = typeof d.pacingBufferDays === "number" ? d.pacingBufferDays : (normalized.deckSettings[deckName].pacingBufferDays ?? 3);
+        normalized.deckSettings[deckName].examDate = d.examDate;
+        normalized.deckSettings[deckName].pacingBufferDays = d.pacingBufferDays;
+        d.cards.forEach(ensureCardSRS);
       }
     });
   }
@@ -2904,6 +3058,22 @@ function normalizeData(savedData) {
   normalized.dailyFlashcards = normalized.dailyFlashcards || {};
   normalized.analyticsRangeDays = Number(savedData.analyticsRangeDays) || 7;
   analyticsRangeDays = normalized.analyticsRangeDays;
+  
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  normalized.settings = normalized.settings || {};
+  normalized.settings.maxNewPerDay = typeof normalized.settings.maxNewPerDay === 'number' ? normalized.settings.maxNewPerDay : 50;
+  normalized.settings.maxReviewsPerDay = typeof normalized.settings.maxReviewsPerDay === 'number' ? normalized.settings.maxReviewsPerDay : 200;
+
+  normalized.dailyStats = normalized.dailyStats || {};
+  normalized.dailyStats.lastStudyDate = normalized.dailyStats.lastStudyDate || todayStr;
+  normalized.dailyStats.newCardsStudiedToday = typeof normalized.dailyStats.newCardsStudiedToday === 'number' ? normalized.dailyStats.newCardsStudiedToday : 0;
+  normalized.dailyStats.reviewsStudiedToday = typeof normalized.dailyStats.reviewsStudiedToday === 'number' ? normalized.dailyStats.reviewsStudiedToday : 0;
+
+  if (normalized.dailyStats.lastStudyDate !== todayStr) {
+    normalized.dailyStats.lastStudyDate = todayStr;
+    normalized.dailyStats.newCardsStudiedToday = 0;
+    normalized.dailyStats.reviewsStudiedToday = 0;
+  }
   
   if (typeof normalized.studySeconds !== "number") {
     normalized.studySeconds = Math.max(0, Number(savedData.studyMinutes || 0) * 60);
@@ -6430,7 +6600,9 @@ function renderFlashcardsTab() {
   const closeBtn = el("closeDeckBtn");
   if (!currentStudyDeck) {
     if (closeBtn) closeBtn.classList.add("hidden");
+    const { newRemaining, reviewRemaining } = getDailyRemainingLimits();
     container.innerHTML = `
+      <div class="limit-badge" style="margin-bottom: 16px;">New: <span id="newRemaining">${newRemaining}</span> | Review: <span id="reviewRemaining">${reviewRemaining}</span></div>
       <div class="empty-state">
         <div class="icon">◈</div>
         <h3>Ready to study</h3>
@@ -6459,6 +6631,16 @@ function initDeckListDelegation() {
         if (confirmed) {
           deleteDeckAndSubdecks(deckName);
         }
+      }
+      return;
+    }
+
+    const settingsBtn = e.target.closest(".deck-settings-btn-tree");
+    if (settingsBtn) {
+      e.stopPropagation();
+      const deckName = settingsBtn.getAttribute("data-deck");
+      if (deckName) {
+        openDeckSettingsModal(deckName);
       }
       return;
     }
@@ -6546,6 +6728,16 @@ function renderTreeNode(node, depth = 0) {
     return reps >= 2;
   }).length;
   const masteryPct = (cards && cards.length > 0) ? Math.round((masteredCards / cards.length) * 100) : 0;
+
+  // Exam burn-down pacing indicator
+  const deckObj = getDeck(node.fullName);
+  let pacingBadgeHtml = "";
+  if (deckObj && deckObj.examDate) {
+    const requiredNew = calculateDeckPacing(deckObj);
+    if (typeof requiredNew === "number") {
+      pacingBadgeHtml = `<div class="pacing-badge">🎯 ${requiredNew} new/day to finish</div>`;
+    }
+  }
   
   const header = document.createElement("div");
   header.className = `deck-item-header-tree ${currentStudyDeck === node.fullName ? "active" : ""}`;
@@ -6556,8 +6748,10 @@ function renderTreeNode(node, depth = 0) {
     <div class="deck-title-row">
       ${!isLeaf ? `<span class="toggle-icon">${isCollapsed ? "▶" : "▼"}</span>` : `<span class="toggle-icon leaf">◈</span>`}
       <h3 class="deck-name" title="${escapeHtml(node.name)}">${escapeHtml(node.name)}</h3>
+      <button type="button" class="deck-settings-btn-tree" title="Deck Settings & Exam Date" data-deck="${escapeHtml(node.fullName)}">⚙</button>
       <button type="button" class="delete-deck-btn-tree" title="Delete Deck" data-deck="${escapeHtml(node.fullName)}">✕</button>
     </div>
+    ${pacingBadgeHtml}
     <div class="deck-node-actions">
       <span class="card-count-badge">${node.cardsCount} cards</span>
       <span class="badge badge-due ${dueCount === 0 ? 'none' : ''}">${dueCount} Due</span>
@@ -6585,6 +6779,9 @@ function renderTreeNode(node, depth = 0) {
 function deleteDeck(name) {
   if (data.flashcardDecks && data.flashcardDecks[name]) {
     delete data.flashcardDecks[name];
+    if (data.deckSettings && data.deckSettings[name]) {
+      delete data.deckSettings[name];
+    }
     saveFlashcardDecks();
     saveUser();
   }
@@ -6598,8 +6795,75 @@ function deleteDeck(name) {
   renderFlashcardsTab();
 }
 
+function openDeckSettingsModal(deckName) {
+  const modal = el("deckSettingsModal");
+  if (!modal) return;
+  const deck = getDeck(deckName);
+  if (!deck) return;
+
+  const nameInput = el("deckSettingsDeckName");
+  const titleEl = el("deckSettingsModalTitle");
+  const datePicker = el("examDatePicker");
+  const bufferInput = el("deckPacingBufferInput");
+
+  if (nameInput) nameInput.value = deckName;
+  if (titleEl) titleEl.textContent = `Deck Settings: ${deckName}`;
+  if (datePicker) datePicker.value = deck.examDate || "";
+  if (bufferInput) bufferInput.value = typeof deck.pacingBufferDays === "number" ? deck.pacingBufferDays : 3;
+
+  modal.classList.remove("hidden");
+  modal.style.removeProperty("display");
+}
+
+function closeDeckSettingsModal() {
+  const modal = el("deckSettingsModal");
+  if (modal) {
+    modal.classList.add("hidden");
+    modal.style.removeProperty("display");
+  }
+}
+
+function saveDeckSettings(deckName, examDate, pacingBufferDays) {
+  if (!deckName) return;
+  data.deckSettings = data.deckSettings || {};
+  const cleanDate = examDate ? String(examDate).trim() : null;
+  const cleanBuffer = typeof pacingBufferDays === "number" ? pacingBufferDays : 3;
+
+  data.deckSettings[deckName] = {
+    examDate: cleanDate,
+    pacingBufferDays: cleanBuffer
+  };
+
+  if (data.flashcardDecks && data.flashcardDecks[deckName]) {
+    data.flashcardDecks[deckName].examDate = cleanDate;
+    data.flashcardDecks[deckName].pacingBufferDays = cleanBuffer;
+  }
+
+  saveFlashcardDecks();
+  debouncedSaveUser(400);
+
+  if (currentStudyDeck === deckName) {
+    buildStudyQueue(deckName);
+    renderActiveCard();
+  }
+  renderDeckList();
+}
+
+window.openDeckSettingsModal = openDeckSettingsModal;
+window.closeDeckSettingsModal = closeDeckSettingsModal;
+window.saveDeckSettings = saveDeckSettings;
+
 function getDeckCards(deckName) {
   const cards = [];
+  if (!deckName || deckName === "All") {
+    for (const name in data.flashcardDecks) {
+      if (Array.isArray(data.flashcardDecks[name])) {
+        cards.push(...data.flashcardDecks[name]);
+      }
+    }
+    cards.forEach(ensureCardSRS);
+    return cards;
+  }
   if (data.flashcardDecks[deckName]) {
     cards.push(...data.flashcardDecks[deckName]);
   }
@@ -6614,23 +6878,78 @@ function getDeckCards(deckName) {
 }
 
 function buildStudyQueue(deckName) {
-  const allCards = getDeckCards(deckName);
+  let deckObj = null;
+  let allCards = [];
+  if (deckName && typeof deckName === "object") {
+    deckObj = deckName;
+    if (!deckObj.cards && Array.isArray(deckObj)) {
+      deckObj.cards = deckObj;
+    }
+    allCards = Array.isArray(deckObj.cards) ? deckObj.cards : [];
+  } else {
+    deckObj = getDeck(deckName);
+    allCards = getDeckCards(deckName);
+  }
   allCards.forEach(ensureCardSRS);
 
+  // 1. Reset daily counts if it is a new local day
+  const todayStr = new Date().toLocaleDateString('en-CA'); // Local YYYY-MM-DD
+  if (!data) data = defaultData();
+  if (!data.dailyStats) {
+    data.dailyStats = {
+      lastStudyDate: todayStr,
+      newCardsStudiedToday: 0,
+      reviewsStudiedToday: 0
+    };
+  }
+  if (!data.settings) {
+    data.settings = {
+      maxNewPerDay: 50,
+      maxReviewsPerDay: 200
+    };
+  }
+  if (data.dailyStats.lastStudyDate !== todayStr) {
+    data.dailyStats.lastStudyDate = todayStr;
+    data.dailyStats.newCardsStudiedToday = 0;
+    data.dailyStats.reviewsStudiedToday = 0;
+  }
+
+  // 2. Filter due cards
   const now = Date.now();
-  // Filter: Only include cards where card.dueDate <= Date.now()
-  const dueCards = allCards.filter(card => (typeof card.dueDate === "number" ? card.dueDate : 0) <= now);
+  const dueCards = allCards.filter(c => (typeof c.dueDate === "number" ? c.dueDate : 0) <= now);
 
-  // Sort: Older dueDate timestamps appear first (Review cards), followed by cards with a dueDate of today (New cards)
-  dueCards.sort((a, b) => (a.dueDate || 0) - (b.dueDate || 0));
+  // 3. Separate into New vs. Review based on reps
+  const newCards = dueCards.filter(c => (c.reps || 0) === 0);
+  const reviewCards = dueCards.filter(c => (c.reps || 0) > 0);
 
-  data.currentStudyQueue = dueCards;
+  // Sort: Older dueDate timestamps appear first (Review cards, followed by New cards)
+  reviewCards.sort((a, b) => (a.dueDate || 0) - (b.dueDate || 0));
+  newCards.sort((a, b) => (a.dueDate || 0) - (b.dueDate || 0));
+
+  // 4. Calculate remaining limits (Override with Burn-Down Pacing if deck has examDate)
+  let maxNew = typeof data.settings.maxNewPerDay === "number" ? data.settings.maxNewPerDay : 50;
+  if (deckObj && deckObj.examDate) {
+    const pacedNew = calculateDeckPacing(deckObj);
+    if (typeof pacedNew === "number") {
+      maxNew = pacedNew;
+    }
+  }
+  const maxReviews = typeof data.settings.maxReviewsPerDay === "number" ? data.settings.maxReviewsPerDay : 200;
+  const newAllowed = Math.max(0, maxNew - (data.dailyStats.newCardsStudiedToday || 0));
+  const reviewsAllowed = Math.max(0, maxReviews - (data.dailyStats.reviewsStudiedToday || 0));
+
+  // 5. Slice arrays to allowed limits
+  const queueNew = newCards.slice(0, newAllowed);
+  const queueReview = reviewCards.slice(0, reviewsAllowed);
+
+  // 6. Combine (Reviews first, then New)
+  data.currentStudyQueue = [...queueReview, ...queueNew];
   currentStudyCards = data.currentStudyQueue;
   currentCardIndex = 0;
   cardFlipped = false;
   cardShownTime = null;
 
-  return dueCards;
+  return data.currentStudyQueue;
 }
 
 window.buildStudyQueue = buildStudyQueue;
@@ -6654,6 +6973,17 @@ function initStudyViewDelegation() {
   container.dataset.delegated = "true";
 
   container.addEventListener("click", (e) => {
+    // Intercept image clicks to open pinch-to-zoom viewer without flipping card
+    const imgTarget = e.target.closest("#flashcardContainer img, .card-content img, .flashcard-content img");
+    if (imgTarget && imgTarget.src) {
+      e.stopPropagation();
+      e.preventDefault();
+      if (typeof openImageZoom === "function") {
+        openImageZoom(imgTarget.src);
+      }
+      return;
+    }
+
     const restartBtn = e.target.closest("#restartDeckBtn");
     if (restartBtn) {
       const allCards = getDeckCards(currentStudyDeck);
@@ -6705,9 +7035,12 @@ function renderActiveCard() {
     el("studyKicker").textContent = `Deck: ${currentStudyDeck || "All"}`;
   }
   
+  const { newRemaining, reviewRemaining } = getDailyRemainingLimits();
+
   const queue = data.currentStudyQueue || currentStudyCards || [];
   if (!queue || queue.length === 0 || currentCardIndex >= queue.length) {
     container.innerHTML = `
+      <div class="limit-badge" style="margin-bottom: 16px;">New: <span id="newRemaining">${newRemaining}</span> | Review: <span id="reviewRemaining">${reviewRemaining}</span></div>
       <div class="empty-state">
         <div class="icon">🎉</div>
         <h3>Deck Finished for Today!</h3>
@@ -6735,6 +7068,8 @@ function renderActiveCard() {
       <span>Good: <b class="good-val">${data.flashcardRatings?.good || 0}</b></span>
       <span>Hard: <b class="hard-val">${data.flashcardRatings?.hard || 0}</b></span>
     </div>
+
+    <div class="limit-badge">New: <span id="newRemaining">${newRemaining}</span> | Review: <span id="reviewRemaining">${reviewRemaining}</span></div>
 
     <div class="flashcard-container ${isLarge ? 'large-card' : ''}" id="flashcardContainer">
       <div class="flashcard-inner ${cardFlipped ? 'flipped' : ''}" id="flashcardInner">
@@ -6821,10 +7156,26 @@ function rateCard(rating) {
   }
   data.flashcardRatings[ratingKey] = (data.flashcardRatings[ratingKey] || 0) + 1;
   
-  // 1. Immediately calculate the new interval, ease, and dueDate with SM-2
+  // 1. Check reps before applying SM-2 math to determine card type and increment dailyStats
   data.currentStudyQueue = data.currentStudyQueue || currentStudyCards || [];
   const card = data.currentStudyQueue[0] || (currentStudyCards && currentStudyCards[currentCardIndex]);
   if (card) {
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    if (!data.dailyStats) {
+      data.dailyStats = { lastStudyDate: todayStr, newCardsStudiedToday: 0, reviewsStudiedToday: 0 };
+    }
+    if (data.dailyStats.lastStudyDate !== todayStr) {
+      data.dailyStats.lastStudyDate = todayStr;
+      data.dailyStats.newCardsStudiedToday = 0;
+      data.dailyStats.reviewsStudiedToday = 0;
+    }
+
+    if ((card.reps || 0) === 0) {
+      data.dailyStats.newCardsStudiedToday = (data.dailyStats.newCardsStudiedToday || 0) + 1;
+    } else {
+      data.dailyStats.reviewsStudiedToday = (data.dailyStats.reviewsStudiedToday || 0) + 1;
+    }
+
     calculateNextReview(card, numRating);
     card.nextReviewDate = card.dueDate;
     card.lastReviewed = Date.now();
@@ -6853,6 +7204,7 @@ function rateCard(rating) {
   cardFlipped = false;
   renderActiveCard();
   renderDeckList();
+  updateDailyLimitBadge();
   if (typeof renderStats === "function") {
     renderStats();
   }
@@ -6861,7 +7213,209 @@ function rateCard(rating) {
 const renderDecksList = () => renderDeckList();
 window.renderDecksList = renderDeckList;
 
+/* ==========================================================================
+   Pinch-to-Zoom & Pan Fullscreen Image Viewer for Mobile / Desktop
+   ========================================================================== */
+let zoomScale = 1;
+let zoomX = 0;
+let zoomY = 0;
+let zoomInitialDistance = 0;
+let zoomInitialScale = 1;
+let zoomLastTouchX = 0;
+let zoomLastTouchY = 0;
+let zoomTouchStartX = 0;
+let zoomTouchStartY = 0;
+let zoomIsPinching = false;
+let zoomIsPanning = false;
+let zoomRafId = null;
+
+function updateZoomTransform() {
+  if (zoomRafId) cancelAnimationFrame(zoomRafId);
+  zoomRafId = requestAnimationFrame(() => {
+    const img = el("zoomedImage");
+    if (img) {
+      img.style.transform = `translate(${zoomX}px, ${zoomY}px) scale(${zoomScale})`;
+    }
+  });
+}
+
+function openImageZoom(imageSrc) {
+  if (!imageSrc) return;
+  const modal = el("imageZoomModal");
+  const img = el("zoomedImage");
+  if (!modal || !img) return;
+
+  zoomScale = 1;
+  zoomX = 0;
+  zoomY = 0;
+  zoomInitialDistance = 0;
+  zoomInitialScale = 1;
+  zoomIsPinching = false;
+  zoomIsPanning = false;
+
+  img.style.transform = "translate(0px, 0px) scale(1)";
+  img.src = imageSrc;
+  modal.classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+}
+
+function closeImageZoom() {
+  const modal = el("imageZoomModal");
+  const img = el("zoomedImage");
+  if (!modal) return;
+
+  modal.classList.add("hidden");
+  zoomScale = 1;
+  zoomX = 0;
+  zoomY = 0;
+  zoomIsPinching = false;
+  zoomIsPanning = false;
+  if (img) {
+    img.style.transform = "";
+    img.src = "";
+  }
+  document.body.style.overflow = "";
+}
+
+function initImageZoomViewer() {
+  const modal = el("imageZoomModal");
+  const closeBtn = el("closeImageZoom");
+  if (!modal || modal.dataset.initialized) return;
+  modal.dataset.initialized = "true";
+
+  if (closeBtn) {
+    closeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeImageZoom();
+    });
+  }
+
+  // Close when tapping background outside the zoomed image
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal || e.target.id === "closeImageZoom" || !e.target.closest("#zoomedImage")) {
+      closeImageZoom();
+    }
+  });
+
+  // Touch Gesture Listeners (Pinch-to-zoom and Pan)
+  modal.addEventListener("touchstart", (e) => {
+    if (e.touches.length === 2) {
+      zoomIsPinching = true;
+      zoomIsPanning = false;
+      const t0 = e.touches[0];
+      const t1 = e.touches[1];
+      zoomInitialDistance = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
+      zoomInitialScale = zoomScale;
+    } else if (e.touches.length === 1) {
+      zoomIsPinching = false;
+      const t = e.touches[0];
+      zoomTouchStartX = t.clientX;
+      zoomTouchStartY = t.clientY;
+      zoomLastTouchX = t.clientX;
+      zoomLastTouchY = t.clientY;
+      zoomIsPanning = zoomScale > 1;
+    }
+  }, { passive: false });
+
+  modal.addEventListener("touchmove", (e) => {
+    if (e.cancelable) {
+      e.preventDefault();
+    }
+
+    if (e.touches.length === 2 && zoomIsPinching) {
+      const t0 = e.touches[0];
+      const t1 = e.touches[1];
+      const currentDistance = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
+      if (zoomInitialDistance > 0) {
+        const factor = currentDistance / zoomInitialDistance;
+        const newScale = zoomInitialScale * factor;
+        zoomScale = Math.min(5, Math.max(1, newScale));
+        if (zoomScale === 1) {
+          zoomX = 0;
+          zoomY = 0;
+        }
+        updateZoomTransform();
+      }
+    } else if (e.touches.length === 1 && zoomScale > 1) {
+      const t = e.touches[0];
+      const deltaX = t.clientX - zoomLastTouchX;
+      const deltaY = t.clientY - zoomLastTouchY;
+      zoomLastTouchX = t.clientX;
+      zoomLastTouchY = t.clientY;
+      zoomX += deltaX;
+      zoomY += deltaY;
+      updateZoomTransform();
+    }
+  }, { passive: false });
+
+  modal.addEventListener("touchend", (e) => {
+    if (e.touches.length === 0) {
+      // Check aggressive swipe-down to exit when scale <= 1
+      if (zoomScale <= 1 && !zoomIsPanning) {
+        const changedTouch = e.changedTouches && e.changedTouches[0];
+        if (changedTouch) {
+          const deltaX = changedTouch.clientX - zoomTouchStartX;
+          const deltaY = changedTouch.clientY - zoomTouchStartY;
+          if (deltaY > 100 && Math.abs(deltaX) < 80) {
+            closeImageZoom();
+            return;
+          }
+        }
+      }
+      zoomIsPinching = false;
+      zoomIsPanning = false;
+    } else if (e.touches.length === 1) {
+      zoomIsPinching = false;
+      const t = e.touches[0];
+      zoomLastTouchX = t.clientX;
+      zoomLastTouchY = t.clientY;
+      zoomIsPanning = zoomScale > 1;
+    }
+  }, { passive: true });
+
+  // Optional mouse wheel zoom on desktop
+  modal.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+    zoomScale = Math.min(5, Math.max(1, zoomScale * zoomFactor));
+    if (zoomScale === 1) {
+      zoomX = 0;
+      zoomY = 0;
+    }
+    updateZoomTransform();
+  }, { passive: false });
+
+  // Escape key exit trigger
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !modal.classList.contains("hidden")) {
+      closeImageZoom();
+    }
+  });
+
+  // Global capture click listener for flashcard images anywhere in the DOM
+  document.addEventListener("click", (e) => {
+    const imgTarget = e.target.closest("#flashcardContainer img, .card-content img, .flashcard-content img");
+    if (imgTarget && imgTarget.src && !imgTarget.closest("#imageZoomModal")) {
+      e.stopPropagation();
+      e.preventDefault();
+      openImageZoom(imgTarget.src);
+    }
+  }, true);
+}
+
+window.openImageZoom = openImageZoom;
+window.closeImageZoom = closeImageZoom;
+window.initImageZoomViewer = initImageZoomViewer;
+window.getImageZoomState = () => ({
+  scale: zoomScale,
+  x: zoomX,
+  y: zoomY,
+  isPinching: zoomIsPinching,
+  isPanning: zoomIsPanning
+});
+
 function bindEvents() {
+  initImageZoomViewer();
   el("loginTab").addEventListener("click", () => setAuthMode("login"));
   el("signupTab").addEventListener("click", () => setAuthMode("signup"));
   el("authForm").addEventListener("submit", handleAuth);
@@ -7786,6 +8340,49 @@ function bindEvents() {
       saveUser();
       closeExamCountdownModal();
       renderExamCountdown();
+    });
+  }
+
+  // Deck Settings & Exam Pacing Modal Bindings
+  const closeDeckSettingsModalBtn = el("closeDeckSettingsModalBtn");
+  if (closeDeckSettingsModalBtn) {
+    closeDeckSettingsModalBtn.addEventListener("click", closeDeckSettingsModal);
+  }
+
+  const cancelDeckSettingsModalBtn = el("cancelDeckSettingsModalBtn");
+  if (cancelDeckSettingsModalBtn) {
+    cancelDeckSettingsModalBtn.addEventListener("click", closeDeckSettingsModal);
+  }
+
+  const clearDeckExamDateBtn = el("clearDeckExamDateBtn");
+  if (clearDeckExamDateBtn) {
+    clearDeckExamDateBtn.addEventListener("click", () => {
+      const picker = el("examDatePicker");
+      if (picker) picker.value = "";
+    });
+  }
+
+  const deckSettingsModal = el("deckSettingsModal");
+  if (deckSettingsModal) {
+    deckSettingsModal.addEventListener("click", (e) => {
+      if (e.target === deckSettingsModal) closeDeckSettingsModal();
+    });
+  }
+
+  const deckSettingsForm = el("deckSettingsForm");
+  if (deckSettingsForm) {
+    deckSettingsForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const nameInput = el("deckSettingsDeckName");
+      const dateInput = el("examDatePicker");
+      const bufferInput = el("deckPacingBufferInput");
+
+      const deckName = nameInput ? nameInput.value : "";
+      const examDate = dateInput ? dateInput.value : null;
+      const bufferDays = bufferInput ? Number(bufferInput.value) : 3;
+
+      saveDeckSettings(deckName, examDate, bufferDays);
+      closeDeckSettingsModal();
     });
   }
 }

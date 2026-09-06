@@ -1558,6 +1558,30 @@ body.focusing .workspace {
   color: var(--red);
 }
 
+/* Daily Limit Badge */
+.limit-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  padding: 4px 12px;
+  border-radius: 9999px;
+  margin-bottom: 14px;
+  letter-spacing: 0.2px;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+
+.limit-badge span {
+  color: var(--soft);
+  font-weight: 700;
+}
+
 .close-deck-btn {
   background: transparent;
   border: none;
@@ -1677,6 +1701,25 @@ body.focusing .workspace {
   min-width: 0;
 }
 
+.deck-title-row .deck-settings-btn-tree {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.deck-title-row .deck-settings-btn-tree:hover {
+  color: var(--purple-light);
+  background: rgba(124, 103, 255, 0.12);
+}
+
 .deck-title-row .delete-deck-btn-tree,
 .deck-actions-tree button.delete-deck-btn-tree {
   background: transparent;
@@ -1689,13 +1732,37 @@ body.focusing .workspace {
   transition: all 0.2s ease;
   line-height: 1;
   flex-shrink: 0;
-  margin-left: auto;
 }
 
 .deck-title-row .delete-deck-btn-tree:hover,
 .deck-actions-tree button.delete-deck-btn-tree:hover {
   color: var(--red);
   background: rgba(255, 110, 121, 0.12);
+}
+
+/* Exam Burn-Down Pacing Badge */
+.pacing-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--mint);
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  padding: 2px 8px;
+  border-radius: 5px;
+  margin: 3px 0 3px 18px;
+  width: fit-content;
+  letter-spacing: 0.2px;
+  user-select: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  transition: all 0.2s ease;
+}
+
+.deck-item-header-tree:hover .pacing-badge {
+  border-color: rgba(16, 185, 129, 0.55);
+  background: rgba(16, 185, 129, 0.14);
 }
 
 .deck-node-actions {
@@ -3001,5 +3068,64 @@ button, .clickable, .time-toggle-btn, .badge {
 
 .analytics-grid.transitioning, .analytics-overview-row.transitioning {
   opacity: 0.92;
+}
+
+/* Fullscreen Pinch-to-Zoom Image Viewer */
+.image-zoom-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.95);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none; /* Critical: Disables native browser zoom/scroll */
+}
+
+.image-zoom-overlay.hidden {
+  display: none !important;
+}
+
+.close-zoom-btn {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: #fff;
+  font-size: 20px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  cursor: pointer;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease;
+}
+
+.close-zoom-btn:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+#zoomedImage {
+  max-width: 100%;
+  max-height: 100%;
+  transform-origin: center center;
+  will-change: transform;
+  transition: transform 0.05s ease-out;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.flashcard-content img,
+.card-content img,
+#flashcardContainer img {
+  cursor: zoom-in;
+  border-radius: 8px;
 }
 
