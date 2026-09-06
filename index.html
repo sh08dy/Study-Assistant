@@ -467,24 +467,6 @@
                 </div>
               </article>
 
-              <!-- Study Frequency Heatmap -->
-              <article class="panel chart-card" style="padding: 18px; display: flex; flex-direction: column; gap: 12px; min-height: 320px;">
-                <div class="panel-kicker" style="margin-bottom: 0;">Study Activity Matrix (Last 30 Days)</div>
-                <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 10px;">
-                  <div id="activityHeatmapContainer" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; max-width: 280px; margin: 0 auto;">
-                    <!-- Heatmap cells -->
-                  </div>
-                  <div style="display: flex; justify-content: center; align-items: center; gap: 6px; font-size: 10px; color: var(--muted); margin-top: 8px;">
-                    <span>Less active</span>
-                    <div style="width: 10px; height: 10px; background: var(--panel-2); border-radius: 2px;"></div>
-                    <div style="width: 10px; height: 10px; background: rgba(124, 103, 255, 0.2); border-radius: 2px;"></div>
-                    <div style="width: 10px; height: 10px; background: rgba(124, 103, 255, 0.5); border-radius: 2px;"></div>
-                    <div style="width: 10px; height: 10px; background: var(--purple); border-radius: 2px;"></div>
-                    <span>More active</span>
-                  </div>
-                </div>
-              </article>
-
               <!-- Flashcard Consistency Heatmap (Last 90 Days) -->
               <article class="panel chart-card" style="padding: 18px; display: flex; flex-direction: column; gap: 12px; grid-column: 1 / -1;">
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
@@ -499,8 +481,20 @@
                     <span>More active</span>
                   </div>
                 </div>
-                <div style="overflow-x: auto; padding: 4px 0;">
-                  <div id="heatmapContainer" class="heatmap-grid"></div>
+                <div class="heatmap-wrapper">
+                  <div id="heatmapMonthsRow" class="heatmap-months-row"></div>
+                  <div class="heatmap-body">
+                    <div class="heatmap-day-labels">
+                      <span></span>
+                      <span>M</span>
+                      <span></span>
+                      <span>W</span>
+                      <span></span>
+                      <span>F</span>
+                      <span></span>
+                    </div>
+                    <div id="heatmapContainer" class="heatmap-grid"></div>
+                  </div>
                 </div>
               </article>
             </div>

@@ -2212,10 +2212,18 @@ let ambientAudioUserPaused = false;
 function updateAmbientAudioUI() {
   const player = el("ambientPlayer");
   const btn = el("toggleAudioBtn");
-  if (player && btn) {
-    const isPlaying = !player.paused;
+  const soundBtn = el("soundButton");
+  const isPlaying = player && !player.paused;
+
+  if (btn) {
     btn.classList.toggle("active", isPlaying);
     btn.title = isPlaying ? "Pause Ambient Audio" : "Play Ambient Audio";
+  }
+  if (soundBtn) {
+    const isSoundOn = Boolean(data && data.sound);
+    soundBtn.textContent = isSoundOn ? "♬" : "♩";
+    soundBtn.classList.toggle("muted", !isSoundOn);
+    soundBtn.title = isSoundOn ? "Mute audio" : "Unmute audio";
   }
 }
 
@@ -2228,7 +2236,7 @@ function syncAmbientAudio() {
     player.src = trackSelect.value;
   }
 
-  const isFocusing = !!(data && data.timerRunning && data.timerMode === "focus");
+  const isFocusing = !!(data && data.timerRunning && data.timerMode === "focus" && data.sound !== false);
   if (isFocusing) {
     if (!ambientAudioUserPaused && player.paused) {
       const playPromise = player.play();
@@ -2258,7 +2266,7 @@ function initAmbientAudio() {
     trackSelect.addEventListener("change", () => {
       const wasPlaying = !player.paused;
       player.src = trackSelect.value;
-      if (wasPlaying || (data && data.timerRunning && data.timerMode === "focus" && !ambientAudioUserPaused)) {
+      if (wasPlaying || (data && data.timerRunning && data.timerMode === "focus" && !ambientAudioUserPaused && data.sound !== false)) {
         const playPromise = player.play();
         if (playPromise && typeof playPromise.catch === "function") {
           playPromise.catch((err) => console.log("Ambient audio track switch play error:", err));
@@ -2275,6 +2283,7 @@ function initAmbientAudio() {
       }
       if (player.paused) {
         ambientAudioUserPaused = false;
+        if (data) data.sound = true;
         const playPromise = player.play();
         if (playPromise && typeof playPromise.catch === "function") {
           playPromise.catch((err) => console.log("Ambient audio manual play error:", err));
@@ -2283,6 +2292,7 @@ function initAmbientAudio() {
         ambientAudioUserPaused = true;
         player.pause();
       }
+      saveUser();
       updateAmbientAudioUI();
     });
 
@@ -2296,6 +2306,7 @@ function initAmbientAudio() {
 function pauseTimer() {
   if (data && data.timerRunning) {
     data.timerRunning = false;
+    data.timerTargetEnd = null;
     resetDocumentTitle();
     saveUser();
     renderTimer();
@@ -2307,6 +2318,7 @@ function resetTimer() {
   if (data) {
     data.timerRemaining = getTimerDuration(data.timerMode);
     data.timerRunning = false;
+    data.timerTargetEnd = null;
     data.timerStartedAt = null;
     resetDocumentTitle();
     saveUser();
@@ -2785,48 +2797,81 @@ function parseMarkdown(text) {
   return html;
 }
 
-function syncTimerOnWake() {
-  if (!data || !data.timerRunning || !data.timerLastTick) return;
-  const now = Date.now();
-  const elapsedMs = now - data.timerLastTick;
-  const elapsedSec = Math.floor(elapsedMs / 1000);
-  if (elapsedSec <= 0) return;
-
-  checkDayChange();
+function tickPomodoroTimer() {
+  if (!data || !data.timerRunning) {
+    resetDocumentTitle();
+    return;
+  }
 
   const mode = data.timerMode || "focus";
-  const maxAllowed = mode === "focus"
-    ? ((data.timerFocusDurationMin || 25) * 60)
-    : ((data.timerBreakDurationMin || 5) * 60);
+  const maxAllowed = getTimerDuration(mode);
 
-  const sessionRemaining = typeof data.timerRemaining === "number" ? data.timerRemaining : maxAllowed;
-  const actualElapsed = Math.min(elapsedSec, sessionRemaining, maxAllowed);
-
-  if (mode === "focus" && actualElapsed > 0) {
-    data.studySeconds = (data.studySeconds || 0) + actualElapsed;
-    const todayStr = getLocalDateString();
-    data.dailyStudy = data.dailyStudy || {};
-    data.dailyStudy[todayStr] = data.studySeconds;
+  if (!data.timerTargetEnd) {
+    const rem = typeof data.timerRemaining === "number" ? data.timerRemaining : maxAllowed;
+    data.timerTargetEnd = Date.now() + (rem * 1000);
   }
 
-  data.timerRemaining = Math.max(0, sessionRemaining - actualElapsed);
+  const now = Date.now();
+  const remaining = Math.max(0, Math.ceil((data.timerTargetEnd - now) / 1000));
+  const prevRemaining = typeof data.timerRemaining === "number" ? data.timerRemaining : remaining;
+  const elapsedSec = Math.max(0, prevRemaining - remaining);
+
+  if (elapsedSec > 0) {
+    checkDayChange();
+    if (mode === "focus") {
+      data.studySeconds = (data.studySeconds || 0) + elapsedSec;
+      const todayStr = getLocalDateString();
+      data.dailyStudy = data.dailyStudy || {};
+      data.dailyStudy[todayStr] = data.studySeconds;
+    }
+  }
+
+  data.timerRemaining = remaining;
   data.timerLastTick = now;
 
-  if (elapsedSec >= sessionRemaining || data.timerRemaining <= 0) {
-    data.timerRemaining = 0;
+  // If remaining === 0, trigger interval completion immediately
+  if (remaining === 0) {
+    data.timerTargetEnd = null;
     try {
-      completeTimerSession({ forcePause: true });
+      completeTimerSession();
     } catch (err) {
-      console.error("Error completing timer on wake:", err);
+      console.error("Error in completeTimerSession:", err);
     }
-    // Always FORCE PAUSE when waking from a system sleep event
-    if (data) {
-      data.timerRunning = false;
-      data.timerStartedAt = null;
-      resetDocumentTitle();
-    }
+    return;
   }
 
+  // Fast path: Only update immediate timer DOM elements
+  try {
+    const timerTextEl = el("timerText") || el("timerDisplay");
+    if (timerTextEl) {
+      timerTextEl.textContent = formatTime(data.timerRemaining);
+    }
+    const minEl = el("timerMinutes");
+    if (minEl) {
+      minEl.textContent = String(Math.floor(data.timerRemaining / 60)).padStart(2, "0");
+    }
+    const secEl = el("timerSeconds");
+    if (secEl) {
+      secEl.textContent = String(data.timerRemaining % 60).padStart(2, "0");
+    }
+    const ring = el("timerRing");
+    if (ring) {
+      const elapsed = maxAllowed - data.timerRemaining;
+      const progress = Math.max(0, Math.min(100, Math.round((elapsed / maxAllowed) * 100)));
+      ring.style.setProperty("--timer", progress);
+    }
+    updateTimerTitle();
+  } catch (err) {
+    console.error("Error updating timer DOM:", err);
+  }
+
+  debouncedSaveUser(2000);
+}
+window.tickPomodoroTimer = tickPomodoroTimer;
+
+function syncTimerOnWake() {
+  if (!data || !data.timerRunning) return;
+  tickPomodoroTimer();
   saveUser();
   renderAll();
 }
@@ -2851,93 +2896,19 @@ window.updateTimerTitle = updateTimerTitle;
 
 function startTimerLoop() {
   stopTimerLoop();
-  if (data) {
+  if (data && data.timerRunning && !data.timerTargetEnd) {
+    const rem = typeof data.timerRemaining === "number" ? data.timerRemaining : getTimerDuration(data.timerMode);
+    data.timerTargetEnd = Date.now() + (rem * 1000);
     data.timerLastTick = Date.now();
     debouncedSaveUser(400);
   }
   timerId = window.setInterval(() => {
-    // 1. Lightweight live clock tick only
     try {
       renderLiveClock();
     } catch (err) {
       console.error("Error in renderLiveClock:", err);
     }
-
-    if (!data || !data.timerRunning) {
-      resetDocumentTitle();
-      return;
-    }
-
-    // 2. Process elapsed time during active countdown
-    const now = Date.now();
-    const elapsedMs = now - data.timerLastTick;
-    const elapsedSec = Math.floor(elapsedMs / 1000);
-    
-    if (elapsedSec > 0) {
-      checkDayChange();
-      const mode = data.timerMode || "focus";
-      const maxAllowed = mode === "focus"
-        ? ((data.timerFocusDurationMin || 25) * 60)
-        : ((data.timerBreakDurationMin || 5) * 60);
-
-      const sessionRemaining = typeof data.timerRemaining === "number" ? data.timerRemaining : maxAllowed;
-      const actualElapsed = Math.min(elapsedSec, sessionRemaining, maxAllowed);
-
-      if (mode === "focus" && actualElapsed > 0) {
-        data.studySeconds = (data.studySeconds || 0) + actualElapsed;
-        const todayStr = getLocalDateString();
-        data.dailyStudy = data.dailyStudy || {};
-        data.dailyStudy[todayStr] = data.studySeconds;
-      }
-      
-      data.timerRemaining = Math.max(0, sessionRemaining - actualElapsed);
-      data.timerLastTick = now;
-      
-      // Session finished
-      if (elapsedSec >= sessionRemaining || data.timerRemaining <= 0) {
-        data.timerRemaining = 0;
-        const wasAsleepLong = elapsedSec >= maxAllowed || elapsedSec >= (sessionRemaining + 5);
-        try {
-          completeTimerSession({ forcePause: wasAsleepLong });
-          if (wasAsleepLong && data) {
-            data.timerRunning = false;
-            resetDocumentTitle();
-          }
-        } catch (err) {
-          console.error("Error in completeTimerSession:", err);
-        }
-        return;
-      }
-
-      // 3. FAST PATH: Only update immediate timer DOM elements on the 1-second tick
-      try {
-        const timerTextEl = el("timerText") || el("timerDisplay");
-        if (timerTextEl) {
-          timerTextEl.textContent = formatTime(data.timerRemaining);
-        }
-        const minEl = el("timerMinutes");
-        if (minEl) {
-          minEl.textContent = String(Math.floor(data.timerRemaining / 60)).padStart(2, "0");
-        }
-        const secEl = el("timerSeconds");
-        if (secEl) {
-          secEl.textContent = String(data.timerRemaining % 60).padStart(2, "0");
-        }
-        const ring = el("timerRing");
-        if (ring) {
-          const max = getTimerDuration(data.timerMode);
-          const elapsed = max - data.timerRemaining;
-          const progress = Math.max(0, Math.min(100, Math.round((elapsed / max) * 100)));
-          ring.style.setProperty("--timer", progress);
-        }
-        updateTimerTitle();
-      } catch (err) {
-        console.error("Error updating timer DOM:", err);
-      }
-
-      // Debounced storage write to avoid synchronous JSON clone on every single tick
-      debouncedSaveUser(2000);
-    }
+    tickPomodoroTimer();
   }, 1000);
 }
 
@@ -2952,20 +2923,12 @@ function stopTimerLoop(keepTitle = false) {
 }
 
 function handleVisibilityChange() {
-  if (document.hidden) {
-    if (data && data.timerRunning) {
-      data.timerLastTick = Date.now();
-    }
-    stopTimerLoop(true);
-    flushDebouncedSaveUser();
-  } else {
-    if (data && data.timerRunning) {
-      syncTimerOnWake();
-    }
-    renderLiveClock();
-    updateTimerTitle();
-    startTimerLoop();
+  if (data && data.timerRunning) {
+    tickPomodoroTimer();
+    renderTimer();
   }
+  renderLiveClock();
+  updateTimerTitle();
 }
 window.handleVisibilityChange = handleVisibilityChange;
 document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -3023,12 +2986,14 @@ function completeTimerSession(options = {}) {
 
   if (shouldAutoStart) {
     data.timerRunning = true;
+    data.timerTargetEnd = Date.now() + (data.timerRemaining * 1000);
     data.timerLastTick = Date.now();
     data.timerStartedAt = Date.now();
     playTone("play");
     updateTimerTitle();
   } else {
     data.timerRunning = false;
+    data.timerTargetEnd = null;
     data.timerStartedAt = null;
     resetDocumentTitle();
   }
@@ -4610,6 +4575,31 @@ function invalidateAnalyticsCache() {
 window.invalidateAnalyticsCache = invalidateAnalyticsCache;
 window.analyticsCache = analyticsCache;
 
+function getCardHealthDistribution() {
+  const ratings = { again: 0, hard: 0, good: 0, easy: 0 };
+  if (!data || !data.flashcardDecks) return ratings;
+  for (const name in data.flashcardDecks) {
+    const d = data.flashcardDecks[name];
+    const cards = Array.isArray(d) ? d : (d && Array.isArray(d.cards) ? d.cards : []);
+    cards.forEach(c => {
+      if (typeof ensureCardSRS === "function") ensureCardSRS(c);
+      const reps = typeof c.reps === "number" ? c.reps : 0;
+      const interval = typeof c.interval === "number" ? c.interval : 0;
+      if (reps === 0 || interval === 0) {
+        ratings.again++;
+      } else if (interval > 0 && interval <= 2) {
+        ratings.hard++;
+      } else if (interval > 2 && interval < 5) {
+        ratings.good++;
+      } else if (interval >= 5) {
+        ratings.easy++;
+      }
+    });
+  }
+  return ratings;
+}
+window.getCardHealthDistribution = getCardHealthDistribution;
+
 async function renderAnalyticsTab() {
   if (!data) return;
 
@@ -4687,10 +4677,9 @@ async function renderAnalyticsTab() {
       renderStats();
     }
 
-    // Flashcards reviews aggregation
-    const ratingsMap = { again: 0, hard: 0, good: 0, easy: 0 };
+    // Flashcards reviews aggregation & card health distribution
+    const ratingsMap = getCardHealthDistribution();
     let rangeReviewsCount = 0;
-    let hasReviewsInWindow = false;
 
     if (Array.isArray(data.flashcardReviews) && data.flashcardReviews.length > 0) {
       data.flashcardReviews.forEach(r => {
@@ -4698,22 +4687,10 @@ async function renderAnalyticsTab() {
         const rDate = getLocalDateString(rTime);
         if (rTime >= cutoff || rangeDateSet.has(rDate)) {
           rangeReviewsCount++;
-          const rating = (r.rating || "").toLowerCase();
-          if (ratingsMap[rating] !== undefined) {
-            ratingsMap[rating]++;
-            hasReviewsInWindow = true;
-          }
         }
       });
     }
     const useDailyFlashcardsFallback = (!Array.isArray(data.flashcardReviews) || data.flashcardReviews.length === 0) && !!(data && data.dailyFlashcards);
-
-    if (!hasReviewsInWindow && data && data.flashcardRatings) {
-      ratingsMap.again = data.flashcardRatings.again || 0;
-      ratingsMap.hard = data.flashcardRatings.hard || 0;
-      ratingsMap.good = data.flashcardRatings.good || 0;
-      ratingsMap.easy = data.flashcardRatings.easy || 0;
-    }
 
     // Single-pass calculation for overview metrics, review fallback, and consistency ratio
     let rangeStudySeconds = 0;
@@ -4793,7 +4770,6 @@ async function renderAnalyticsTab() {
   renderSessionsBarChart(rangeDateStrings, sessionCountMap);
 
   // 5. Render Study Frequency Heatmap
-  renderActivityHeatmap();
   renderHeatmap();
 
   // 5.5. Render Subject Tag Study Distribution
@@ -5008,32 +4984,7 @@ function renderAnkiRatingsDonut(precomputedRatings) {
   const container = el("ankiRatingsChartContainer");
   if (!container) return;
 
-  const N = analyticsRangeDays || 7;
-  let ratings = precomputedRatings;
-
-  if (!ratings) {
-    ratings = { again: 0, hard: 0, good: 0, easy: 0 };
-    const cutoff = Date.now() - (N * 24 * 60 * 60 * 1000);
-    let hasReviews = false;
-    if (Array.isArray(data.flashcardReviews) && data.flashcardReviews.length > 0) {
-      data.flashcardReviews.forEach(r => {
-        const rTime = r.timestamp || (r.date ? new Date(r.date).getTime() : 0);
-        if (rTime >= cutoff) {
-          const rating = (r.rating || "").toLowerCase();
-          if (ratings[rating] !== undefined) {
-            ratings[rating]++;
-            hasReviews = true;
-          }
-        }
-      });
-    }
-    if (!hasReviews && data.flashcardRatings) {
-      ratings.again = data.flashcardRatings.again || 0;
-      ratings.hard = data.flashcardRatings.hard || 0;
-      ratings.good = data.flashcardRatings.good || 0;
-      ratings.easy = data.flashcardRatings.easy || 0;
-    }
-  }
+  const ratings = precomputedRatings || getCardHealthDistribution();
 
   const easy = ratings.easy || 0;
   const good = ratings.good || 0;
@@ -5054,9 +5005,9 @@ function renderAnkiRatingsDonut(precomputedRatings) {
       const segmentsGroup = existingWrapper.querySelector(".donut-segments-group");
       const legendEl = existingWrapper.querySelector(".donut-legend-container");
       if (titleEl) titleEl.textContent = "0";
-      if (subEl) subEl.textContent = "Reviews";
+      if (subEl) subEl.textContent = "Cards";
       if (segmentsGroup) segmentsGroup.innerHTML = "";
-      if (legendEl) legendEl.innerHTML = `<span style="color:var(--muted); font-size:12px;">No reviews in this window</span>`;
+      if (legendEl) legendEl.innerHTML = `<span style="color:var(--muted); font-size:12px;">No flashcards found</span>`;
       return;
     }
     container.innerHTML = `
@@ -5065,22 +5016,24 @@ function renderAnkiRatingsDonut(precomputedRatings) {
           <circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="var(--panel-2)" stroke-width="${strokeWidth}" />
           <g class="donut-segments-group"></g>
           <text x="${center}" y="${center + 5}" class="donut-label-title">0</text>
-          <text x="${center}" y="${center + 20}" class="donut-label-sub">Reviews</text>
+          <text x="${center}" y="${center + 20}" class="donut-label-sub">Cards</text>
         </svg>
         <div class="donut-legend-container" style="display:flex; flex-direction:column; gap:8px; font-size:11px; margin-left: 20px;">
-          <span style="color:var(--muted); font-size:12px;">No reviews in this window</span>
+          <span style="color:var(--muted); font-size:12px;">No flashcards found</span>
         </div>
       </div>
     `;
     return;
   }
 
-  const segments = [
+  const allCategories = [
     { color: "var(--mint)", count: easy, label: "Easy" },
     { color: "var(--purple)", count: good, label: "Good" },
     { color: "var(--amber)", count: hard, label: "Hard" },
     { color: "var(--red)", count: again, label: "Again" }
-  ].filter(s => s.count > 0);
+  ];
+
+  const segments = allCategories.filter(s => s.count > 0);
 
   let accumulatedPercent = 0;
   let circlesHtml = "";
@@ -5100,13 +5053,23 @@ function renderAnkiRatingsDonut(precomputedRatings) {
   });
 
   let legendHtml = "";
-  segments.forEach(seg => {
-    const pct = Math.round((seg.count / total) * 100);
+  allCategories.forEach(seg => {
+    const pct = total > 0 ? Math.round((seg.count / total) * 100) : 0;
     legendHtml += `
-      <div style="display:flex; align-items:center; gap:6px;">
-        <div style="width:10px; height:10px; background:${seg.color}; border-radius:50%;"></div>
-        <span style="color:var(--text); font-weight:700;">${seg.count}</span>
-        <span style="color:var(--muted);">${seg.label} (${pct}%)</span>
+      <div style="display:flex; flex-direction:column; gap:3px; min-width:130px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <div style="width:10px; height:10px; background:${seg.color}; border-radius:50%;"></div>
+            <span style="color:var(--text); font-weight:600;">${seg.label}</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:4px;">
+            <span style="color:var(--text); font-weight:700;">${seg.count}</span>
+            <span style="color:var(--muted); font-size:10px;">(${pct}%)</span>
+          </div>
+        </div>
+        <div style="width:100%; height:4px; background:var(--panel-2); border-radius:2px; overflow:hidden;">
+          <div style="width:${pct}%; height:100%; background:${seg.color}; border-radius:2px;"></div>
+        </div>
       </div>
     `;
   });
@@ -5119,7 +5082,7 @@ function renderAnkiRatingsDonut(precomputedRatings) {
     const legendEl = existingWrapper.querySelector(".donut-legend-container");
     if (titleEl && segmentsGroup && legendEl) {
       titleEl.textContent = total;
-      if (subEl) subEl.textContent = "Reviews";
+      if (subEl) subEl.textContent = "Cards";
       segmentsGroup.innerHTML = circlesHtml;
       legendEl.innerHTML = legendHtml;
       return;
@@ -5132,7 +5095,7 @@ function renderAnkiRatingsDonut(precomputedRatings) {
         <circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="${strokeWidth}" />
         <g class="donut-segments-group">${circlesHtml}</g>
         <text x="${center}" y="${center - 2}" class="donut-label-title">${total}</text>
-        <text x="${center}" y="${center + 14}" class="donut-label-sub">Reviews</text>
+        <text x="${center}" y="${center + 14}" class="donut-label-sub">Cards</text>
       </svg>
       <div class="donut-legend-container" style="display:flex; flex-direction:column; gap:8px; font-size:11px; margin-left: 20px;">
         ${legendHtml}
@@ -5291,6 +5254,27 @@ function renderHeatmap() {
   // Daily flashcard goal to calculate level 1-4 thresholds
   const goal = Number((data.settings && data.settings.dailyFlashcardGoal) || data.flashcardsGoal || 50);
   const effectiveGoal = goal > 0 ? goal : 50;
+
+  // Month labels positioned over first column of each month
+  const monthsRow = el("heatmapMonthsRow");
+  if (monthsRow) {
+    monthsRow.innerHTML = "";
+    let lastMonth = null;
+    for (let i = 0; i < 90; i++) {
+      const col = Math.floor(i / 7);
+      const d = new Date(today);
+      d.setDate(today.getDate() - (89 - i));
+      const monthName = d.toLocaleDateString("en-US", { month: "short" });
+      if (monthName !== lastMonth) {
+        lastMonth = monthName;
+        const span = document.createElement("span");
+        span.textContent = monthName;
+        span.style.position = "absolute";
+        span.style.left = `${col * 15}px`;
+        monthsRow.appendChild(span);
+      }
+    }
+  }
 
   const fragment = document.createDocumentFragment();
 
@@ -8034,8 +8018,25 @@ function bindEvents() {
 
   el("soundButton").addEventListener("click", () => {
     data.sound = !data.sound;
+    const player = el("ambientPlayer");
+    if (player) {
+      if (!data.sound) {
+        ambientAudioUserPaused = true;
+        player.pause();
+      } else {
+        ambientAudioUserPaused = false;
+        if (data && data.timerRunning && data.timerMode === "focus") {
+          const trackSelect = el("ambientTrack");
+          if (trackSelect && trackSelect.value && !player.src) {
+            player.src = trackSelect.value;
+          }
+          player.play().catch(e => console.log("Ambient audio autoplay deferred:", e));
+        }
+      }
+    }
     saveUser();
     renderAll();
+    updateAmbientAudioUI();
     if (data.sound) playTone("play");
   });
 
@@ -8044,6 +8045,7 @@ function bindEvents() {
       data.timerMode = button.dataset.mode;
       data.timerRemaining = getTimerDuration(data.timerMode);
       data.timerRunning = false;
+      data.timerTargetEnd = null;
       resetDocumentTitle();
       saveUser();
       renderTimer();
@@ -8053,6 +8055,8 @@ function bindEvents() {
   el("playTimer").addEventListener("click", () => {
     data.timerRunning = !data.timerRunning;
     if (data.timerRunning) {
+      const rem = typeof data.timerRemaining === "number" ? data.timerRemaining : getTimerDuration(data.timerMode);
+      data.timerTargetEnd = Date.now() + (rem * 1000);
       data.timerLastTick = Date.now();
       data.timerStartedAt = data.timerStartedAt || Date.now();
       playTone("play");
@@ -8061,6 +8065,7 @@ function bindEvents() {
         ambientAudioUserPaused = false;
       }
     } else {
+      data.timerTargetEnd = null;
       resetDocumentTitle();
     }
     saveUser();
