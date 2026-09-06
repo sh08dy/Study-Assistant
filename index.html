@@ -622,8 +622,8 @@
     </main>
 
     <!-- Calendar Event Creator/Editor Modal -->
-    <div id="calendarEventModal" class="modal-backdrop hidden" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: flex; justify-content: center; align-items: center; z-index: 2000; backdrop-filter: blur(4px);">
-      <div class="panel modal-content" style="width: 100%; max-width: 400px; padding: 20px; display: flex; flex-direction: column; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.3);">
+    <div id="calendarEventModal" class="modal-backdrop modal-overlay hidden">
+      <div class="panel modal-content modal-card" style="display: flex; flex-direction: column; gap: 14px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <h3 id="modalEventTitleLabel" style="font-size: 14px; font-weight: 700; margin: 0; color: var(--text);">Create Calendar Event</h3>
           <button type="button" id="closeEventModalBtn" style="background: transparent; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px;">✕</button>
@@ -692,8 +692,8 @@
     </div>
 
     <!-- Rename Color Label Modal -->
-    <div id="renameColorModal" class="modal-backdrop hidden" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: flex; justify-content: center; align-items: center; z-index: 2100; backdrop-filter: blur(4px);">
-      <div class="panel modal-content" style="width: 100%; max-width: 320px; padding: 20px; display: flex; flex-direction: column; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.3);">
+    <div id="renameColorModal" class="modal-backdrop modal-overlay hidden">
+      <div class="panel modal-content modal-card" style="display: flex; flex-direction: column; gap: 14px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <h3 style="font-size: 13px; font-weight: 700; margin: 0; color: var(--text);">Rename Category</h3>
           <button type="button" id="closeRenameModalBtn" style="background: transparent; border: none; color: var(--muted); font-size: 16px; cursor: pointer; padding: 4px;">✕</button>
@@ -716,8 +716,8 @@
     </div>
 
     <!-- Supabase User Auth & Cloud Sync Modal -->
-    <div id="authModal" class="modal-backdrop hidden" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.65); display: flex; justify-content: center; align-items: center; z-index: 2200; backdrop-filter: blur(5px);">
-      <div class="panel modal-content" style="width: 100%; max-width: 380px; padding: 22px; display: flex; flex-direction: column; gap: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 12px 30px rgba(0,0,0,0.4);">
+    <div id="authModal" class="modal-backdrop modal-overlay hidden">
+      <div class="panel modal-content modal-card" style="display: flex; flex-direction: column; gap: 16px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="28" height="28" style="border-radius: 6px; flex-shrink: 0;">
@@ -783,7 +783,7 @@
     </div>
     <!-- Exam Countdown Setup Modal -->
     <div id="examCountdownModal" class="modal-backdrop modal-overlay hidden">
-      <div class="panel modal-content modal-card" style="padding: 22px; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 12px 30px rgba(0,0,0,0.4);">
+      <div class="panel modal-content modal-card" style="display: flex; flex-direction: column; gap: 16px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <h3 style="font-size: 14px; font-weight: 700; margin: 0; color: var(--text);">Set Target Exam Countdown</h3>
           <button type="button" id="closeExamCountdownModalBtn" style="background: transparent; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px;">✕</button>
@@ -807,7 +807,7 @@
 
     <!-- Deck Settings & Exam Burn-Down Pacing Modal -->
     <div id="deckSettingsModal" class="modal-backdrop modal-overlay hidden">
-      <div class="panel modal-content modal-card" style="padding: 22px; display: flex; flex-direction: column; gap: 16px; max-width: 420px; box-shadow: 0 12px 30px rgba(0,0,0,0.45);">
+      <div class="panel modal-content modal-card" style="display: flex; flex-direction: column; gap: 16px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <span style="font-size: 16px;">⚙</span>
@@ -838,7 +838,7 @@
 
     <!-- Unified In-App Dialog Modal (Alert, Confirm, Prompt) -->
     <div id="appDialogModal" class="modal-backdrop modal-overlay hidden">
-      <div class="panel modal-content modal-card dialog-modal-card" style="padding: 22px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 12px 30px rgba(0,0,0,0.45);">
+      <div class="panel modal-content modal-card dialog-modal-card" style="display: flex; flex-direction: column; gap: 14px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <h3 id="appDialogTitle" style="font-size: 14px; font-weight: 700; margin: 0; color: var(--text);">Notice</h3>
           <button type="button" id="appDialogCloseBtn" style="background: transparent; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px;">✕</button>

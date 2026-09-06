@@ -2981,6 +2981,76 @@ body.notes-focus-active .workspace {
 
 /* Calendar Responsive Styling for Mobile Screens */
 @media (max-width: 768px) {
+  /* Pin navigation bar cleanly to the bottom of the phone screen */
+  .sidebar, .nav-tabs {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    top: auto !important;
+    width: 100% !important;
+    height: 60px !important;
+    background: #111116 !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-around !important;
+    padding: 0 8px !important;
+    margin: 0 !important;
+    z-index: 1000 !important;
+    overflow: hidden !important; /* No horizontal scroll */
+  }
+
+  /* Equal width, unified touch targets */
+  .sidebar .nav-item, .nav-tab-btn {
+    flex: 1 1 0 !important;
+    height: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-size: 18px !important;
+    background: transparent !important;
+    border: none !important;
+  }
+
+  /* Active state indicator without shifting element dimensions */
+  .sidebar .nav-item.active, .nav-tab-btn.active {
+    color: #8b5cf6 !important;
+    background: rgba(139, 92, 246, 0.1) !important;
+    border-radius: 8px !important;
+  }
+
+  /* Prevent bottom navigation bar from overlapping content */
+  main, .app-container, .content-area {
+    padding-bottom: 76px !important;
+  }
+  .workspace {
+    padding-bottom: 76px !important;
+  }
+
+  .sidebar-brand,
+  .sidebar .nav-divider {
+    display: none !important;
+  }
+  .sidebar-bottom {
+    display: contents !important;
+  }
+  .sidebar .avatar {
+    flex: 1 1 0 !important;
+    height: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-size: 14px !important;
+    background: transparent !important;
+    border: none !important;
+  }
+
   .calendar-layout {
     grid-template-columns: 1fr !important;
     height: auto !important;
@@ -3033,48 +3103,80 @@ body.notes-focus-active .workspace {
   }
 }
 
-/* High-Priority Modal Overlay and Card Interior */
-#examCountdownModal,
-#appDialogModal,
-.modal-overlay,
-.modal-backdrop {
+/* Fix Modal Overlay Clipping & Centering */
+.modal-overlay, #goalModal, #confirmModal, .palette-overlay {
   position: fixed !important;
-  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
   width: 100vw !important;
+  width: 100dvw !important;
   height: 100vh !important;
-  background: rgba(0, 0, 0, 0.75) !important;
-  backdrop-filter: blur(8px) !important;
-  -webkit-backdrop-filter: blur(8px) !important;
+  height: 100dvh !important;
+  background: rgba(0, 0, 0, 0.7) !important;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
   z-index: 99999 !important;
-  opacity: 1 !important;
-  visibility: visible !important;
+  padding: 16px;
+  box-sizing: border-box;
 }
 
-#examCountdownModal.hidden,
-#appDialogModal.hidden,
-.modal-overlay.hidden,
-.modal-backdrop.hidden {
+.modal-overlay.hidden, #goalModal.hidden, #confirmModal.hidden {
   display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
 }
 
-#examCountdownModal .modal-content,
-#appDialogModal .modal-content,
-#examCountdownModal .modal-card,
-#appDialogModal .modal-card,
-#appDialogModal .dialog-modal-card {
-  position: relative !important;
-  z-index: 100000 !important;
-  background: #13141f !important; /* matching dashboard dark theme */
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  border-radius: 16px !important;
-  max-width: 420px !important;
-  width: 90% !important;
+.modal-card, .modal-content {
+  width: 100%;
+  max-width: 380px;
+  background: #18181f;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+  box-sizing: border-box;
+  margin: auto;
+}
+
+/* Modal Backdrop & Specific Modals Fallback Compatibility */
+.modal-backdrop,
+#appDialogModal,
+#examCountdownModal,
+#deckSettingsModal,
+#calendarEventModal,
+#renameColorModal,
+#authModal {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  width: 100dvw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  background: rgba(0, 0, 0, 0.7) !important;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 99999 !important;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.modal-backdrop.hidden,
+#appDialogModal.hidden,
+#examCountdownModal.hidden,
+#deckSettingsModal.hidden,
+#calendarEventModal.hidden,
+#renameColorModal.hidden,
+#authModal.hidden {
+  display: none !important;
 }
 
 /* Subject Coverage Clean Layout */
