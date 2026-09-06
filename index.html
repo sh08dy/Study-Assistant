@@ -864,6 +864,24 @@
       <img id="zoomedImage" src="" alt="Zoomed view" />
     </div>
 
+    <!-- Global Command Palette Modal (Cmd+K / Ctrl+K) -->
+    <div id="commandPaletteModal" class="palette-overlay hidden">
+      <div class="palette-modal">
+        <div class="palette-search-bar">
+          <span class="palette-icon">🔍</span>
+          <input 
+            type="text" 
+            id="paletteInput" 
+            placeholder="Search decks, commands, or views..." 
+            autocomplete="off" 
+            spellcheck="false" 
+          />
+          <kbd class="palette-kbd">ESC</kbd>
+        </div>
+        <ul id="paletteResults" class="palette-results"></ul>
+      </div>
+    </div>
+
     <script src="app.js"></script>
   </body>
 </html>

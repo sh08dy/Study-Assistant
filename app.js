@@ -7771,8 +7771,383 @@ window.getImageZoomState = () => ({
   isPanning: zoomIsPanning
 });
 
+/* ==========================================================================
+   GLOBAL COMMAND PALETTE (Cmd+K / Ctrl+K)
+   ========================================================================== */
+
+let paletteActiveIndex = 0;
+let paletteCurrentItems = [];
+
+function getCommandPaletteItems(query = "") {
+  const q = (query || "").trim().toLowerCase();
+  const items = [];
+
+  // 1. Navigation Commands
+  items.push({
+    id: "nav-dashboard",
+    title: "Go to Dashboard",
+    badge: "Navigation",
+    keywords: ["dashboard", "home", "main", "overview", "go"],
+    action: () => {
+      switchView("Dashboard");
+    }
+  });
+
+  items.push({
+    id: "nav-flashcards",
+    title: "Go to Flashcards",
+    badge: "Navigation",
+    keywords: ["flashcards", "decks", "cards", "study", "library", "go"],
+    action: () => {
+      switchView("Flashcards");
+    }
+  });
+
+  items.push({
+    id: "nav-analytics",
+    title: "Go to Analytics",
+    badge: "Navigation",
+    keywords: ["analytics", "stats", "charts", "heatmap", "graphs", "go"],
+    action: () => {
+      switchView("Analytics");
+    }
+  });
+
+  // 2. Timer & Audio Commands
+  items.push({
+    id: "timer-focus-25",
+    title: "Start 25m Focus",
+    badge: "Timer",
+    keywords: ["timer", "focus", "pomodoro", "start", "25", "work"],
+    action: () => {
+      if (data) {
+        data.timerMode = "focus";
+        if (data.timerSettings) data.timerSettings.focus = 25;
+        const fInput = el("focusMinInput");
+        if (fInput) fInput.value = 25;
+        const rem = 25 * 60;
+        data.timerRemaining = rem;
+        data.timerRunning = true;
+        data.timerTargetEnd = Date.now() + (rem * 1000);
+        data.timerLastTick = Date.now();
+        data.timerStartedAt = Date.now();
+        ambientAudioUserPaused = false;
+        if (data.sound) playTone("play");
+        updateTimerTitle();
+        saveUser();
+        renderTimer();
+        syncAmbientAudio();
+        startTimerLoop();
+      }
+    }
+  });
+
+  items.push({
+    id: "timer-break-5",
+    title: "Take 5m Break",
+    badge: "Timer",
+    keywords: ["timer", "break", "rest", "5", "take"],
+    action: () => {
+      if (data) {
+        data.timerMode = "break";
+        if (data.timerSettings) data.timerSettings.break = 5;
+        const bInput = el("breakMinInput");
+        if (bInput) bInput.value = 5;
+        const rem = 5 * 60;
+        data.timerRemaining = rem;
+        data.timerRunning = true;
+        data.timerTargetEnd = Date.now() + (rem * 1000);
+        data.timerLastTick = Date.now();
+        data.timerStartedAt = Date.now();
+        if (data.sound) playTone("play");
+        updateTimerTitle();
+        saveUser();
+        renderTimer();
+        syncAmbientAudio();
+        startTimerLoop();
+      }
+    }
+  });
+
+  items.push({
+    id: "timer-pause",
+    title: "Pause Timer",
+    badge: "Timer",
+    keywords: ["timer", "pause", "stop", "halt"],
+    action: () => {
+      pauseTimer();
+    }
+  });
+
+  items.push({
+    id: "timer-reset",
+    title: "Reset Timer",
+    badge: "Timer",
+    keywords: ["timer", "reset", "restart", "clear"],
+    action: () => {
+      resetTimer();
+    }
+  });
+
+  items.push({
+    id: "audio-toggle",
+    title: "Toggle Ambient Audio",
+    badge: "Audio",
+    keywords: ["audio", "ambient", "music", "sound", "lofi", "noise", "mute", "unmute"],
+    action: () => {
+      const toggleBtn = el("toggleAudioBtn");
+      if (toggleBtn) {
+        toggleBtn.click();
+      } else {
+        const soundBtn = el("soundButton");
+        if (soundBtn) soundBtn.click();
+      }
+    }
+  });
+
+  // 3. Deck Search
+  if (data && data.flashcardDecks && typeof data.flashcardDecks === "object") {
+    const deckNames = Object.keys(data.flashcardDecks);
+    const nowTime = Date.now();
+    deckNames.forEach(deckName => {
+      const cards = typeof getDeckCards === "function" ? getDeckCards(deckName) : (
+        Array.isArray(data.flashcardDecks[deckName]) ? data.flashcardDecks[deckName] : (
+          (data.flashcardDecks[deckName] && data.flashcardDecks[deckName].cards) || []
+        )
+      );
+      const totalCards = cards.length;
+      let dueCount = 0;
+      (cards || []).forEach(card => {
+        const nextReview = card.nextReviewDate || (card.srs && card.srs.nextReviewDate) || card.due;
+        if (!nextReview) {
+          dueCount++;
+        } else {
+          const reviewTime = typeof nextReview === "number" ? nextReview : new Date(nextReview).getTime();
+          if (isNaN(reviewTime) || reviewTime <= nowTime) {
+            dueCount++;
+          }
+        }
+      });
+
+      const badgeText = `${dueCount} due • ${totalCards} cards`;
+
+      items.push({
+        id: `deck-${deckName}`,
+        title: `Study: ${deckName}`,
+        badge: badgeText,
+        deckName: deckName,
+        keywords: ["study", "deck", "cards", deckName.toLowerCase()],
+        action: () => {
+          switchView("Flashcards");
+          if (typeof startStudySession === "function") {
+            startStudySession(deckName);
+          }
+          if (typeof renderFlashcardsTab === "function") {
+            renderFlashcardsTab();
+          }
+        }
+      });
+    });
+  }
+
+  // Filter based on query
+  if (!q) {
+    return items;
+  }
+
+  return items.filter(item => {
+    const inTitle = item.title.toLowerCase().includes(q);
+    const inBadge = item.badge.toLowerCase().includes(q);
+    const inDeck = item.deckName && item.deckName.toLowerCase().includes(q);
+    const inKeywords = item.keywords && item.keywords.some(k => k.toLowerCase().includes(q));
+    return inTitle || inBadge || inDeck || inKeywords;
+  });
+}
+
+function renderCommandPaletteResults(query = "") {
+  const resultsList = el("paletteResults");
+  if (!resultsList) return;
+  resultsList.innerHTML = "";
+
+  paletteCurrentItems = getCommandPaletteItems(query);
+  paletteActiveIndex = 0;
+
+  if (paletteCurrentItems.length === 0) {
+    const emptyLi = document.createElement("li");
+    emptyLi.className = "palette-empty";
+    emptyLi.style.padding = "16px";
+    emptyLi.style.textAlign = "center";
+    emptyLi.style.color = "var(--text-muted, #888)";
+    emptyLi.style.fontSize = "13px";
+    emptyLi.textContent = "No matching commands or decks found";
+    resultsList.appendChild(emptyLi);
+    return;
+  }
+
+  paletteCurrentItems.forEach((item, idx) => {
+    const li = document.createElement("li");
+    li.className = "palette-item" + (idx === paletteActiveIndex ? " active" : "");
+    li.setAttribute("data-index", idx);
+
+    const titleSpan = document.createElement("span");
+    titleSpan.className = "palette-item-title";
+    titleSpan.textContent = item.title;
+
+    const badgeSpan = document.createElement("span");
+    badgeSpan.className = "palette-item-badge";
+    badgeSpan.textContent = item.badge;
+
+    li.appendChild(titleSpan);
+    li.appendChild(badgeSpan);
+
+    li.addEventListener("mouseenter", () => {
+      paletteActiveIndex = idx;
+      updatePaletteActiveItem();
+    });
+
+    li.addEventListener("click", () => {
+      executePaletteAction(item);
+    });
+
+    resultsList.appendChild(li);
+  });
+}
+
+function updatePaletteActiveItem() {
+  const resultsList = el("paletteResults");
+  if (!resultsList) return;
+  const items = resultsList.querySelectorAll(".palette-item");
+  items.forEach((itemEl, idx) => {
+    const isActive = idx === paletteActiveIndex;
+    itemEl.classList.toggle("active", isActive);
+    if (isActive) {
+      itemEl.scrollIntoView({ block: "nearest" });
+    }
+  });
+}
+
+function executePaletteAction(item) {
+  closeCommandPalette();
+  if (item && typeof item.action === "function") {
+    try {
+      item.action();
+    } catch (err) {
+      console.error("Error executing palette action:", err);
+    }
+  }
+}
+
+function openCommandPalette() {
+  const modal = el("commandPaletteModal");
+  const input = el("paletteInput");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  if (input) {
+    input.value = "";
+    setTimeout(() => input.focus(), 20);
+  }
+  renderCommandPaletteResults("");
+}
+
+function closeCommandPalette() {
+  const modal = el("commandPaletteModal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  const input = el("paletteInput");
+  if (input) input.blur();
+}
+
+function toggleCommandPalette() {
+  const modal = el("commandPaletteModal");
+  if (!modal) return;
+  if (modal.classList.contains("hidden")) {
+    openCommandPalette();
+  } else {
+    closeCommandPalette();
+  }
+}
+
+function initCommandPalette() {
+  const modal = el("commandPaletteModal");
+  const input = el("paletteInput");
+  if (!modal || (modal.dataset && modal.dataset.initialized)) return;
+  if (modal.dataset) modal.dataset.initialized = "true";
+
+  if (input) {
+    input.addEventListener("input", (e) => {
+      renderCommandPaletteResults(e.target.value);
+    });
+  }
+
+  // Close on backdrop click outside modal
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) {
+      closeCommandPalette();
+    }
+  });
+
+  const kbd = modal.querySelector(".palette-kbd");
+  if (kbd) {
+    kbd.addEventListener("click", () => {
+      closeCommandPalette();
+    });
+  }
+
+  // Keyboard shortcut listener
+  window.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      toggleCommandPalette();
+      return;
+    }
+
+    if (!modal.classList.contains("hidden")) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeCommandPalette();
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (paletteCurrentItems.length > 0) {
+          paletteActiveIndex = (paletteActiveIndex + 1) % paletteCurrentItems.length;
+          updatePaletteActiveItem();
+        }
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (paletteCurrentItems.length > 0) {
+          paletteActiveIndex = (paletteActiveIndex - 1 + paletteCurrentItems.length) % paletteCurrentItems.length;
+          updatePaletteActiveItem();
+        }
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (paletteCurrentItems.length > 0 && paletteCurrentItems[paletteActiveIndex]) {
+          executePaletteAction(paletteCurrentItems[paletteActiveIndex]);
+        }
+        return;
+      }
+    }
+  });
+}
+
+window.openCommandPalette = openCommandPalette;
+window.closeCommandPalette = closeCommandPalette;
+window.toggleCommandPalette = toggleCommandPalette;
+window.initCommandPalette = initCommandPalette;
+window.renderCommandPaletteResults = renderCommandPaletteResults;
+window.getCommandPaletteItems = getCommandPaletteItems;
+
+if (typeof document !== "undefined" && document.readyState !== "loading") {
+  initCommandPalette();
+}
+
 function bindEvents() {
   initImageZoomViewer();
+  initCommandPalette();
   initAmbientAudio();
   el("loginTab").addEventListener("click", () => setAuthMode("login"));
   el("signupTab").addEventListener("click", () => setAuthMode("signup"));
