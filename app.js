@@ -87,6 +87,57 @@ function getLocalDateString(dateInput = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+function ensureCardSRS(card) {
+  if (!card || typeof card !== "object") return card;
+  if (typeof card.reps !== "number") card.reps = 0;
+  if (typeof card.interval !== "number") card.interval = 0;
+  if (typeof card.ease !== "number") card.ease = 2.5;
+  if (typeof card.dueDate !== "number") {
+    card.dueDate = typeof card.nextReviewDate === "number" ? card.nextReviewDate : Date.now();
+  }
+  return card;
+}
+
+function calculateNextReview(card, rating) {
+  ensureCardSRS(card);
+
+  // rating: 1 (Again), 2 (Hard), 3 (Good), 4 (Easy)
+  let numRating = 3;
+  if (typeof rating === "number") {
+    numRating = Math.max(1, Math.min(4, Math.round(rating)));
+  } else if (typeof rating === "string") {
+    const map = { again: 1, hard: 2, good: 3, easy: 4, "1": 1, "2": 2, "3": 3, "4": 4 };
+    numRating = map[rating.toLowerCase().trim()] || 3;
+  }
+
+  if (numRating === 1) {
+    card.reps = 0;
+    card.interval = 1;
+  } else {
+    card.reps += 1;
+    if (card.reps === 1) {
+      card.interval = 1;
+    } else if (card.reps === 2) {
+      card.interval = 6;
+    } else {
+      card.interval = Math.round(card.interval * card.ease);
+    }
+  }
+
+  // Update Ease Factor (minimum 1.3 to prevent interval stagnation)
+  card.ease = card.ease + (0.1 - (5 - numRating) * (0.08 + (5 - numRating) * 0.02));
+  if (card.ease < 1.3) card.ease = 1.3;
+
+  // Set next due date
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  card.dueDate = Date.now() + (card.interval * ONE_DAY);
+  
+  return card;
+}
+
+window.ensureCardSRS = ensureCardSRS;
+window.calculateNextReview = calculateNextReview;
+
 const defaultData = () => ({
   studySeconds: 0,
   studyGoal: 360,
@@ -128,6 +179,7 @@ const defaultData = () => ({
   sessionsToday: 0,
   lastActiveDate: getLocalDateString(),
   flashcardDecks: {},
+  currentStudyQueue: [],
   flashcardsToday: 0,
   flashcardsGoal: 50,
   flashcardRatings: { easy: 0, good: 0, hard: 0 },
@@ -2835,6 +2887,14 @@ function normalizeData(savedData) {
   normalized.sessionsToday = typeof normalized.sessionsToday === 'number' ? normalized.sessionsToday : 0;
   normalized.lastActiveDate = normalized.lastActiveDate || "";
   normalized.flashcardDecks = normalized.flashcardDecks || {};
+  normalized.currentStudyQueue = Array.isArray(normalized.currentStudyQueue) ? normalized.currentStudyQueue : [];
+  if (typeof normalized.flashcardDecks === "object" && normalized.flashcardDecks !== null) {
+    Object.keys(normalized.flashcardDecks).forEach(deckName => {
+      if (Array.isArray(normalized.flashcardDecks[deckName])) {
+        normalized.flashcardDecks[deckName].forEach(ensureCardSRS);
+      }
+    });
+  }
   
   normalized.flashcardsToday = typeof normalized.flashcardsToday === 'number' ? normalized.flashcardsToday : 0;
   normalized.flashcardsGoal = typeof normalized.flashcardsGoal === 'number' ? normalized.flashcardsGoal : 50;
@@ -3564,7 +3624,15 @@ async function importAnkiFromArrayBuffer(arrayBuffer, fallbackFilename = "Import
       
       if (cleanFront && cleanBack) {
         if (!importedDecks[deckName]) importedDecks[deckName] = [];
-        importedDecks[deckName].push({ front: cleanFront, back: cleanBack, ord: ord });
+        importedDecks[deckName].push({
+          front: cleanFront,
+          back: cleanBack,
+          ord: ord,
+          reps: 0,
+          interval: 0,
+          ease: 2.5,
+          dueDate: Date.now()
+        });
       }
     });
     
@@ -6228,7 +6296,11 @@ async function viewNote(key, filename) {
         const newCard = {
           front: frontVal,
           back: backVal,
-          ord: Date.now()
+          ord: Date.now(),
+          reps: 0,
+          interval: 0,
+          ease: 2.5,
+          dueDate: Date.now()
         };
 
         if (!data.flashcardDecks[targetDeck]) {
@@ -6537,14 +6609,35 @@ function getDeckCards(deckName) {
       cards.push(...data.flashcardDecks[name]);
     }
   }
+  cards.forEach(ensureCardSRS);
   return cards;
 }
 
-function startStudySession(deckName) {
-  currentStudyDeck = deckName;
-  currentStudyCards = getDeckCards(deckName);
+function buildStudyQueue(deckName) {
+  const allCards = getDeckCards(deckName);
+  allCards.forEach(ensureCardSRS);
+
+  const now = Date.now();
+  // Filter: Only include cards where card.dueDate <= Date.now()
+  const dueCards = allCards.filter(card => (typeof card.dueDate === "number" ? card.dueDate : 0) <= now);
+
+  // Sort: Older dueDate timestamps appear first (Review cards), followed by cards with a dueDate of today (New cards)
+  dueCards.sort((a, b) => (a.dueDate || 0) - (b.dueDate || 0));
+
+  data.currentStudyQueue = dueCards;
+  currentStudyCards = data.currentStudyQueue;
   currentCardIndex = 0;
   cardFlipped = false;
+  cardShownTime = null;
+
+  return dueCards;
+}
+
+window.buildStudyQueue = buildStudyQueue;
+
+function startStudySession(deckName) {
+  currentStudyDeck = deckName;
+  buildStudyQueue(deckName);
   
   document.querySelectorAll(".deck-item-header-tree").forEach(item => {
     const studyBtn = item.querySelector(".start-deck-btn-tree");
@@ -6563,7 +6656,16 @@ function initStudyViewDelegation() {
   container.addEventListener("click", (e) => {
     const restartBtn = e.target.closest("#restartDeckBtn");
     if (restartBtn) {
-      startStudySession(currentStudyDeck);
+      const allCards = getDeckCards(currentStudyDeck);
+      if (allCards && allCards.length > 0) {
+        data.currentStudyQueue = [...allCards];
+        currentStudyCards = data.currentStudyQueue;
+        currentCardIndex = 0;
+        cardFlipped = false;
+        renderActiveCard();
+      } else {
+        startStudySession(currentStudyDeck);
+      }
       return;
     }
 
@@ -6598,15 +6700,19 @@ function initStudyViewDelegation() {
 function renderActiveCard() {
   initStudyViewDelegation();
   const container = el("studyViewContainer");
-  el("studyKicker").textContent = `Deck: ${currentStudyDeck}`;
+  if (!container) return;
+  if (el("studyKicker")) {
+    el("studyKicker").textContent = `Deck: ${currentStudyDeck || "All"}`;
+  }
   
-  if (currentCardIndex >= currentStudyCards.length) {
+  const queue = data.currentStudyQueue || currentStudyCards || [];
+  if (!queue || queue.length === 0 || currentCardIndex >= queue.length) {
     container.innerHTML = `
       <div class="empty-state">
         <div class="icon">🎉</div>
-        <h3>Deck Completed!</h3>
-        <p>Excellent work. You have reviewed all ${currentStudyCards.length} cards in this deck.</p>
-        <button type="button" class="primary-action" id="restartDeckBtn" style="margin-top: 10px;">Review Again</button>
+        <h3>Deck Finished for Today!</h3>
+        <p>Excellent work. You have reviewed all scheduled cards in this deck for today.</p>
+        <button type="button" class="primary-action" id="restartDeckBtn" style="margin-top: 10px;">Review Ahead</button>
       </div>
     `;
     return;
@@ -6616,7 +6722,8 @@ function renderActiveCard() {
     cardShownTime = Date.now();
   }
   
-  const card = currentStudyCards[currentCardIndex];
+  const card = queue[currentCardIndex] || queue[0];
+  ensureCardSRS(card);
   
   const frontHtml = renderImageOcclusionHTML(card, false);
   const backHtml = renderImageOcclusionHTML(card, true);
@@ -6643,16 +6750,17 @@ function renderActiveCard() {
     </div>
     
     <div class="study-controls">
-      <div class="study-progress">Card ${currentCardIndex + 1} of ${currentStudyCards.length}</div>
+      <div class="study-progress">${queue.length} ${queue.length === 1 ? 'card' : 'cards'} due</div>
       <div id="cardActions" style="width: 100%;">
         ${cardFlipped ? `
           <div class="rating-buttons">
-            <button type="button" data-rating="hard" id="rateHardBtn">Hard</button>
-            <button type="button" data-rating="good" id="rateGoodBtn">Good</button>
-            <button type="button" data-rating="easy" id="rateEasyBtn">Easy</button>
+            <button type="button" data-rating="again" id="rateAgainBtn"><span class="key-hint">1</span> Again</button>
+            <button type="button" data-rating="hard" id="rateHardBtn"><span class="key-hint">2</span> Hard</button>
+            <button type="button" data-rating="good" id="rateGoodBtn"><span class="key-hint">3</span> Good</button>
+            <button type="button" data-rating="easy" id="rateEasyBtn"><span class="key-hint">4</span> Easy</button>
           </div>
         ` : `
-          <button type="button" class="show-answer-btn" id="showAnswerBtn">Show Answer</button>
+          <button type="button" class="show-answer-btn" id="showAnswerBtn"><span class="key-hint">Space / Enter</span> Show Answer</button>
         `}
       </div>
     </div>
@@ -6687,6 +6795,12 @@ function rateCard(rating) {
     elapsed = (Date.now() - cardShownTime) / 1000;
     cardShownTime = null;
   }
+
+  // Map the ratings: Again = 1, Hard = 2, Good = 3, Easy = 4
+  const ratingMap = { again: 1, hard: 2, good: 3, easy: 4, "1": 1, "2": 2, "3": 3, "4": 4, 1: 1, 2: 2, 3: 3, 4: 4 };
+  const strMap = { 1: "again", 2: "hard", 3: "good", 4: "easy" };
+  const numRating = ratingMap[typeof rating === "string" ? rating.toLowerCase().trim() : rating] || 3;
+  const ratingKey = strMap[numRating] || "good";
   
   data.flashcards = (data.flashcards || 0) + 1;
   data.flashcardsToday = (data.flashcardsToday || 0) + 1;
@@ -6699,32 +6813,32 @@ function rateCard(rating) {
   data.flashcardReviews.push({
     timestamp: Date.now(),
     deck: (typeof currentStudyDeck !== "undefined" ? currentStudyDeck : "") || "",
-    rating: rating
+    rating: ratingKey
   });
 
   if (!data.flashcardRatings) {
     data.flashcardRatings = { again: 0, easy: 0, good: 0, hard: 0 };
   }
-  data.flashcardRatings[rating] = (data.flashcardRatings[rating] || 0) + 1;
+  data.flashcardRatings[ratingKey] = (data.flashcardRatings[ratingKey] || 0) + 1;
   
-  // SRS Interval and nextReviewDate calculation on current card
-  if (currentStudyCards && currentStudyCards[currentCardIndex]) {
-    const card = currentStudyCards[currentCardIndex];
-    let interval = Number(card.interval) || 0;
-    if (rating === "again") {
-      interval = 1;
-    } else if (rating === "hard") {
-      interval = Math.max(1, Math.round(interval * 1.2) || 1);
-    } else if (rating === "good") {
-      interval = interval === 0 ? 1 : (interval === 1 ? 3 : Math.round(interval * 2.5));
-    } else if (rating === "easy") {
-      interval = interval === 0 ? 4 : Math.max(4, Math.round(interval * 3.5));
-    }
-    card.interval = interval;
-    card.nextReviewDate = Date.now() + (interval * 24 * 60 * 60 * 1000);
+  // 1. Immediately calculate the new interval, ease, and dueDate with SM-2
+  data.currentStudyQueue = data.currentStudyQueue || currentStudyCards || [];
+  const card = data.currentStudyQueue[0] || (currentStudyCards && currentStudyCards[currentCardIndex]);
+  if (card) {
+    calculateNextReview(card, numRating);
+    card.nextReviewDate = card.dueDate;
     card.lastReviewed = Date.now();
-    saveFlashcardDecks();
   }
+
+  // 2. Remove the card from data.currentStudyQueue
+  if (Array.isArray(data.currentStudyQueue) && data.currentStudyQueue.length > 0) {
+    data.currentStudyQueue.shift();
+  }
+  currentStudyCards = data.currentStudyQueue;
+  currentCardIndex = 0;
+
+  // 3. Persist updated card data to IndexedDB, localStorage, and Supabase
+  saveFlashcardDecks();
 
   const todayStr = getLocalDateString();
   data.dailyFlashcards = data.dailyFlashcards || {};
@@ -6735,7 +6849,7 @@ function rateCard(rating) {
   }
   debouncedSaveUser(400);
   
-  currentCardIndex++;
+  // 4. Render the next card in the queue (or congratulatory screen if queue is empty)
   cardFlipped = false;
   renderActiveCard();
   renderDeckList();
