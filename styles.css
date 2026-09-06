@@ -1179,54 +1179,53 @@ body.focusing .workspace {
 #calendarPage.hidden,
 #dashboardView.hidden,
 #analyticsView.hidden,
-#calendarView.hidden {
+#calendarView.hidden,
+#flashcardsPage.hidden {
   display: none !important;
 }
 
-/* Flashcards Page Layout */
-.flashcards-layout {
-  display: grid;
-  grid-template-columns: 340px 1fr;
-  gap: 16px;
-  min-height: 480px;
-  margin-top: 20px;
-  transition: grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.flashcards-layout.sidebar-collapsed {
-  grid-template-columns: 50px 1fr;
-}
-
-/* Sidebar toggle button styling */
-.sidebar-toggle-btn {
-  background: transparent;
-  border: none;
-  color: var(--muted);
-  font-size: 14px;
-  cursor: pointer;
-  padding: 6px;
+/* Flashcards Page Layout - Fixed-Height Locked Layout */
+#flashcardsPage {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-  line-height: 1;
+  height: calc(100vh - 80px); /* Adjust 80px based on actual navbar height */
+  overflow: hidden;
 }
 
-.sidebar-toggle-btn:hover {
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.08);
+.flashcards-layout {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  gap: 16px;
+  margin-top: 10px;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+.flashcard-sidebar,
 .library-panel {
+  width: 320px;
+  height: 100%;
+  overflow-y: auto;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  transition: padding 0.3s ease;
+  transition: padding 0.3s ease, width 0.3s ease;
 }
 
+.flashcards-layout.sidebar-collapsed .flashcard-sidebar,
 .flashcards-layout.sidebar-collapsed .library-panel {
+  width: 50px;
   padding: 12px 6px;
+  align-items: center;
+}
+
+.flashcard-main-area,
+.study-panel {
+  flex: 1;
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   align-items: center;
 }
 
@@ -1517,11 +1516,26 @@ body.focusing .workspace {
 
 /* Media Queries for Responsive Flashcards */
 @media (max-width: 820px) {
-  .flashcards-layout {
-    grid-template-columns: 1fr;
+  #flashcardsPage {
+    height: auto;
+    min-height: calc(100vh - 80px);
+    overflow: visible;
   }
+  .flashcards-layout {
+    flex-direction: column;
+    height: auto;
+    overflow: visible;
+  }
+  .flashcard-sidebar,
   .library-panel {
-    min-height: auto;
+    width: 100%;
+    height: auto;
+    max-height: 350px;
+  }
+  .flashcard-main-area,
+  .study-panel {
+    width: 100%;
+    height: auto;
   }
 }
 

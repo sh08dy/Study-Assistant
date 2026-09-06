@@ -110,28 +110,53 @@ function calculateNextReview(card, rating) {
     numRating = map[rating.toLowerCase().trim()] || 3;
   }
 
-  if (numRating === 1) {
-    card.reps = 0;
-    card.interval = 1;
+  const ONE_MINUTE = 60 * 1000;
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+
+  if (card.interval === 0) {
+    // LEARNING PHASE
+    if (numRating === 1) { // Again
+      card.dueDate = Date.now() + (1 * ONE_MINUTE);
+      card.reps = 0;
+    } else if (numRating === 2) { // Hard
+      card.dueDate = Date.now() + (3 * ONE_MINUTE);
+      card.reps = 0;
+    } else if (numRating === 3) { // Good
+      if (card.reps === 0) {
+        card.dueDate = Date.now() + (5 * ONE_MINUTE);
+        card.reps = 1;
+      } else {
+        // Graduates to 1 day
+        card.dueDate = Date.now() + ONE_DAY;
+        card.interval = 1;
+        card.reps = 2;
+      }
+    } else if (numRating === 4) { // Easy
+      // Instantly graduates to 3 days
+      card.dueDate = Date.now() + (3 * ONE_DAY);
+      card.interval = 3;
+      card.reps = 2;
+    }
   } else {
-    card.reps += 1;
-    if (card.reps === 1) {
-      card.interval = 1;
-    } else if (card.reps === 2) {
-      card.interval = 6;
+    // GRADUATED PHASE (Standard SM-2)
+    if (numRating === 1) {
+      // Lapse: drop back to learning phase (1 min)
+      card.dueDate = Date.now() + (1 * ONE_MINUTE);
+      card.interval = 0; 
+      card.reps = 0;
+      card.ease = Math.max(1.3, card.ease - 0.2);
     } else {
-      card.interval = Math.round(card.interval * card.ease);
+      // Normal SM-2 calculations
+      card.reps++;
+      if (numRating === 2) card.interval = Math.max(1, Math.round(card.interval * 1.2));
+      else if (numRating === 3) card.interval = Math.max(1, Math.round(card.interval * card.ease));
+      else if (numRating === 4) card.interval = Math.max(1, Math.round(card.interval * card.ease * 1.3));
+      
+      card.ease = Math.max(1.3, card.ease + (0.1 - (5 - numRating) * (0.08 + (5 - numRating) * 0.02)));
+      card.dueDate = Date.now() + (card.interval * ONE_DAY);
     }
   }
-
-  // Update Ease Factor (minimum 1.3 to prevent interval stagnation)
-  card.ease = card.ease + (0.1 - (5 - numRating) * (0.08 + (5 - numRating) * 0.02));
-  if (card.ease < 1.3) card.ease = 1.3;
-
-  // Set next due date
-  const ONE_DAY = 24 * 60 * 60 * 1000;
-  card.dueDate = Date.now() + (card.interval * ONE_DAY);
-  
+  card.nextReviewDate = card.dueDate;
   return card;
 }
 
@@ -255,6 +280,26 @@ function getDailyRemainingLimits() {
 }
 
 function updateDailyLimitBadge() {
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  if (data && data.dailyStats) {
+    if (data.dailyStats.lastStudyDate !== todayStr) {
+      data.dailyStats.lastStudyDate = todayStr;
+      data.dailyStats.newCardsStudiedToday = 0;
+      data.dailyStats.reviewsStudiedToday = 0;
+    }
+  }
+  const progress = data && data.dailyStats 
+    ? ((data.dailyStats.newCardsStudiedToday || 0) + (data.dailyStats.reviewsStudiedToday || 0)) 
+    : 0;
+  const goalTotal = (data && data.settings && typeof data.settings.dailyFlashcardGoal === "number")
+    ? data.settings.dailyFlashcardGoal
+    : (data && typeof data.flashcardsGoal === "number" ? data.flashcardsGoal : 50);
+
+  const progEl = el("flashcardGoalProgress");
+  const totEl = el("flashcardGoalTotal");
+  if (progEl) progEl.textContent = String(progress);
+  if (totEl) totEl.textContent = String(goalTotal);
+
   const { newRemaining, reviewRemaining } = getDailyRemainingLimits();
   const newEl = el("newRemaining");
   const revEl = el("reviewRemaining");
@@ -266,6 +311,45 @@ window.calculateDeckPacing = calculateDeckPacing;
 window.getDeck = getDeck;
 window.getDailyRemainingLimits = getDailyRemainingLimits;
 window.updateDailyLimitBadge = updateDailyLimitBadge;
+
+window.devAdvanceTime = (days = 1) => {
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  const shiftMs = (Number(days) || 1) * ONE_DAY;
+
+  if (data && data.flashcardDecks) {
+    for (const dKey in data.flashcardDecks) {
+      const d = data.flashcardDecks[dKey];
+      const cards = Array.isArray(d) ? d : (d && Array.isArray(d.cards) ? d.cards : []);
+      cards.forEach(c => {
+        if (typeof c.dueDate === "number") {
+          c.dueDate -= shiftMs;
+          c.nextReviewDate = c.dueDate;
+        }
+      });
+    }
+  }
+  if (data && Array.isArray(data.currentStudyQueue)) {
+    data.currentStudyQueue.forEach(c => {
+      if (typeof c.dueDate === "number") {
+        c.dueDate -= shiftMs;
+        c.nextReviewDate = c.dueDate;
+      }
+    });
+  }
+  console.log(`Shifted due dates back by ${days} days.`);
+  if (typeof buildStudyQueue === "function") {
+    buildStudyQueue(currentStudyDeck);
+  }
+  if (typeof renderActiveCard === "function") {
+    renderActiveCard();
+  }
+  if (typeof renderDeckList === "function") {
+    renderDeckList();
+  }
+  if (typeof updateDailyLimitBadge === "function") {
+    updateDailyLimitBadge();
+  }
+};
 
 const defaultData = () => ({
   studySeconds: 0,
@@ -317,7 +401,8 @@ const defaultData = () => ({
   dailyFlashcards: {},
   settings: {
     maxNewPerDay: 50,
-    maxReviewsPerDay: 200
+    maxReviewsPerDay: 200,
+    dailyFlashcardGoal: 50
   },
   dailyStats: {
     lastStudyDate: new Date().toLocaleDateString('en-CA'),
@@ -3063,6 +3148,7 @@ function normalizeData(savedData) {
   normalized.settings = normalized.settings || {};
   normalized.settings.maxNewPerDay = typeof normalized.settings.maxNewPerDay === 'number' ? normalized.settings.maxNewPerDay : 50;
   normalized.settings.maxReviewsPerDay = typeof normalized.settings.maxReviewsPerDay === 'number' ? normalized.settings.maxReviewsPerDay : 200;
+  normalized.settings.dailyFlashcardGoal = typeof normalized.settings.dailyFlashcardGoal === 'number' ? normalized.settings.dailyFlashcardGoal : (normalized.flashcardsGoal || 50);
 
   normalized.dailyStats = normalized.dailyStats || {};
   normalized.dailyStats.lastStudyDate = normalized.dailyStats.lastStudyDate || todayStr;
@@ -6600,9 +6686,23 @@ function renderFlashcardsTab() {
   const closeBtn = el("closeDeckBtn");
   if (!currentStudyDeck) {
     if (closeBtn) closeBtn.classList.add("hidden");
-    const { newRemaining, reviewRemaining } = getDailyRemainingLimits();
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    if (data && data.dailyStats) {
+      if (data.dailyStats.lastStudyDate !== todayStr) {
+        data.dailyStats.lastStudyDate = todayStr;
+        data.dailyStats.newCardsStudiedToday = 0;
+        data.dailyStats.reviewsStudiedToday = 0;
+      }
+    }
+    const progress = data && data.dailyStats 
+      ? ((data.dailyStats.newCardsStudiedToday || 0) + (data.dailyStats.reviewsStudiedToday || 0)) 
+      : 0;
+    const goalTotal = (data && data.settings && typeof data.settings.dailyFlashcardGoal === "number")
+      ? data.settings.dailyFlashcardGoal
+      : (data && typeof data.flashcardsGoal === "number" ? data.flashcardsGoal : 50);
+
     container.innerHTML = `
-      <div class="limit-badge" style="margin-bottom: 16px;">New: <span id="newRemaining">${newRemaining}</span> | Review: <span id="reviewRemaining">${reviewRemaining}</span></div>
+      <div class="limit-badge" style="margin-bottom: 16px;">Daily Goal: <span id="flashcardGoalProgress">${progress}</span> / <span id="flashcardGoalTotal">${goalTotal}</span></div>
       <div class="empty-state">
         <div class="icon">◈</div>
         <h3>Ready to study</h3>
@@ -6914,9 +7014,10 @@ function buildStudyQueue(deckName) {
     data.dailyStats.reviewsStudiedToday = 0;
   }
 
-  // 2. Filter due cards
+  // 2. Filter due cards (including 30-minute learn-ahead limit)
   const now = Date.now();
-  const dueCards = allCards.filter(c => (typeof c.dueDate === "number" ? c.dueDate : 0) <= now);
+  const LEARN_AHEAD_LIMIT = 30 * 60 * 1000;
+  const dueCards = allCards.filter(c => (typeof c.dueDate === "number" ? c.dueDate : 0) <= now + LEARN_AHEAD_LIMIT);
 
   // 3. Separate into New vs. Review based on reps
   const newCards = dueCards.filter(c => (c.reps || 0) === 0);
@@ -6955,6 +7056,7 @@ function buildStudyQueue(deckName) {
 window.buildStudyQueue = buildStudyQueue;
 
 function startStudySession(deckName) {
+  if (data) data.isReviewingAhead = false;
   currentStudyDeck = deckName;
   buildStudyQueue(deckName);
   
@@ -6988,6 +7090,7 @@ function initStudyViewDelegation() {
     if (restartBtn) {
       const allCards = getDeckCards(currentStudyDeck);
       if (allCards && allCards.length > 0) {
+        if (data) data.isReviewingAhead = true;
         data.currentStudyQueue = [...allCards];
         currentStudyCards = data.currentStudyQueue;
         currentCardIndex = 0;
@@ -7035,12 +7138,42 @@ function renderActiveCard() {
     el("studyKicker").textContent = `Deck: ${currentStudyDeck || "All"}`;
   }
   
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  if (data && data.dailyStats) {
+    if (data.dailyStats.lastStudyDate !== todayStr) {
+      data.dailyStats.lastStudyDate = todayStr;
+      data.dailyStats.newCardsStudiedToday = 0;
+      data.dailyStats.reviewsStudiedToday = 0;
+    }
+  }
+  const progress = data && data.dailyStats 
+    ? ((data.dailyStats.newCardsStudiedToday || 0) + (data.dailyStats.reviewsStudiedToday || 0)) 
+    : 0;
+  const goalTotal = (data && data.settings && typeof data.settings.dailyFlashcardGoal === "number")
+    ? data.settings.dailyFlashcardGoal
+    : (data && typeof data.flashcardsGoal === "number" ? data.flashcardsGoal : 50);
+
   const { newRemaining, reviewRemaining } = getDailyRemainingLimits();
 
   const queue = data.currentStudyQueue || currentStudyCards || [];
-  if (!queue || queue.length === 0 || currentCardIndex >= queue.length) {
+  const ONE_MINUTE = 60 * 1000;
+  const LEARN_AHEAD_LIMIT = 30 * ONE_MINUTE; // 30-minute learn-ahead limit
+
+  let activeCard = null;
+  if (queue && queue.length > 0) {
+    const frontCard = queue[currentCardIndex] || queue[0];
+    if (frontCard) {
+      ensureCardSRS(frontCard);
+      // If the front card's dueDate is within the next 20-30 minutes or reviewing ahead, serve it immediately
+      if (data.isReviewingAhead || typeof frontCard.dueDate !== "number" || frontCard.dueDate <= Date.now() + LEARN_AHEAD_LIMIT) {
+        activeCard = frontCard;
+      }
+    }
+  }
+
+  if (!activeCard) {
     container.innerHTML = `
-      <div class="limit-badge" style="margin-bottom: 16px;">New: <span id="newRemaining">${newRemaining}</span> | Review: <span id="reviewRemaining">${reviewRemaining}</span></div>
+      <div class="limit-badge" style="margin-bottom: 16px;">Daily Goal: <span id="flashcardGoalProgress">${progress}</span> / <span id="flashcardGoalTotal">${goalTotal}</span></div>
       <div class="empty-state">
         <div class="icon">🎉</div>
         <h3>Deck Finished for Today!</h3>
@@ -7055,7 +7188,7 @@ function renderActiveCard() {
     cardShownTime = Date.now();
   }
   
-  const card = queue[currentCardIndex] || queue[0];
+  const card = activeCard;
   ensureCardSRS(card);
   
   const frontHtml = renderImageOcclusionHTML(card, false);
@@ -7069,7 +7202,7 @@ function renderActiveCard() {
       <span>Hard: <b class="hard-val">${data.flashcardRatings?.hard || 0}</b></span>
     </div>
 
-    <div class="limit-badge">New: <span id="newRemaining">${newRemaining}</span> | Review: <span id="reviewRemaining">${reviewRemaining}</span></div>
+    <div class="limit-badge">Daily Goal: <span id="flashcardGoalProgress">${progress}</span> / <span id="flashcardGoalTotal">${goalTotal}</span></div>
 
     <div class="flashcard-container ${isLarge ? 'large-card' : ''}" id="flashcardContainer">
       <div class="flashcard-inner ${cardFlipped ? 'flipped' : ''}" id="flashcardInner">
@@ -7170,7 +7303,9 @@ function rateCard(rating) {
       data.dailyStats.reviewsStudiedToday = 0;
     }
 
-    if ((card.reps || 0) === 0) {
+    // Track stats BEFORE mutating
+    const isNew = (card.reps || 0) === 0;
+    if (isNew) {
       data.dailyStats.newCardsStudiedToday = (data.dailyStats.newCardsStudiedToday || 0) + 1;
     } else {
       data.dailyStats.reviewsStudiedToday = (data.dailyStats.reviewsStudiedToday || 0) + 1;
@@ -7181,9 +7316,18 @@ function rateCard(rating) {
     card.lastReviewed = Date.now();
   }
 
-  // 2. Remove the card from data.currentStudyQueue
+  // 2. Intra-Session Queue Management
+  // If the new dueDate is less than 24 hours away (it's a minute-based step), do not remove it
+  // Push it to the back and re-sort the queue ascending by dueDate
+  const ONE_DAY = 24 * 60 * 60 * 1000;
   if (Array.isArray(data.currentStudyQueue) && data.currentStudyQueue.length > 0) {
-    data.currentStudyQueue.shift();
+    if (card && typeof card.dueDate === "number" && (card.dueDate - Date.now() < ONE_DAY)) {
+      data.currentStudyQueue.shift();
+      data.currentStudyQueue.push(card);
+      data.currentStudyQueue.sort((a, b) => (a.dueDate || 0) - (b.dueDate || 0));
+    } else {
+      data.currentStudyQueue.shift();
+    }
   }
   currentStudyCards = data.currentStudyQueue;
   currentCardIndex = 0;

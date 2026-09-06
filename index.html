@@ -311,7 +311,7 @@
 
         <section id="flashcardsPage" class="page-view hidden">
           <div class="flashcards-layout">
-            <aside class="panel library-panel" id="libraryPanel">
+            <aside class="panel library-panel flashcard-sidebar" id="libraryPanel">
               <div class="library-panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; width: 100%;">
                 <div class="panel-kicker" style="margin-bottom: 0;">Anki Library</div>
                 <button type="button" id="sidebarToggleBtn" class="sidebar-toggle-btn" title="Collapse Library">◀</button>
@@ -330,12 +330,13 @@
               </div>
             </aside>
 
-            <article class="panel study-panel">
+            <article class="panel study-panel flashcard-main-area">
               <div class="study-panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
                 <div class="panel-kicker" id="studyKicker" style="margin-bottom: 0;">Active Study</div>
                 <button type="button" id="closeDeckBtn" class="close-deck-btn hidden" title="Close Deck">✕</button>
               </div>
               <div id="studyViewContainer" class="study-view-container">
+                <div class="limit-badge">Daily Goal: <span id="flashcardGoalProgress">0</span> / <span id="flashcardGoalTotal">50</span></div>
                 <!-- Dynamic active study panel or empty state -->
               </div>
             </article>
