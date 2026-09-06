@@ -1137,18 +1137,42 @@ body.focusing .workspace {
   .sidebar {
     min-height: auto;
     flex-direction: row;
-    justify-content: center;
+    justify-content: flex-start;
+    align-items: center;
     border-right: 0;
     border-bottom: 1px solid #1e2028;
-    padding: 12px;
-    gap: 10px;
-    flex-wrap: wrap;
+    padding: 8px 12px;
+    gap: 8px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .sidebar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .sidebar .nav-item,
+  .sidebar .avatar,
+  .sidebar .sidebar-brand {
+    flex-shrink: 0;
+    width: 42px;
+    height: 42px;
+    min-width: 42px;
+    min-height: 42px;
+    margin: 0;
   }
 
   .sidebar-bottom {
     margin-top: 0;
     display: flex;
-    gap: 10px;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    margin-left: auto;
   }
 
   .nav-divider {
@@ -3329,5 +3353,50 @@ button, .clickable, .time-toggle-btn, .badge {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.06);
   color: var(--text-muted, #888);
+}
+
+/* Mobile & Global Tab Navigation Rules */
+.nav-tabs,
+.header-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none; /* Hide scrollbar */
+  -webkit-overflow-scrolling: touch;
+  gap: 8px;
+}
+.nav-tabs::-webkit-scrollbar,
+.header-tabs::-webkit-scrollbar {
+  display: none;
+}
+.nav-tab-btn {
+  flex: 1 0 auto;
+  white-space: nowrap;
+  min-height: 40px;
+  /* Keep sizing uniform regardless of active state */
+  font-size: 14px;
+  padding: 8px 14px;
+}
+
+/* Subject Coverage: Delete Subject Button */
+.delete-subject-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.6;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.delete-subject-btn:hover {
+  opacity: 1;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.15);
 }
 

@@ -404,6 +404,7 @@ const defaultData = () => ({
   dailyStudy: {},
   dailySessions: {},
   sessionsToday: 0,
+  weeklyFocusMinutes: { M: 0, T: 0, W: 0, T2: 0, F: 0, S: 0, S2: 0 },
   lastActiveDate: getLocalDateString(),
   flashcardDecks: {},
   currentStudyQueue: [],
@@ -1218,11 +1219,13 @@ function loadUserData() {
     }
   }
 
-  // Ensure Friday (2026-09-04) logged minutes (~43m) persist
-  if (!data.dailyStudy["2026-09-04"] || data.dailyStudy["2026-09-04"] < 43 * 60) {
-    data.dailyStudy["2026-09-04"] = Math.max(data.dailyStudy["2026-09-04"] || 0, 43 * 60);
-    data.dailySessions = data.dailySessions || {};
-    data.dailySessions["2026-09-04"] = Math.max(data.dailySessions["2026-09-04"] || 0, 1);
+  // Clean up any stale mock Friday seed (43m) if no actual session exists
+  if (data && data.dailyStudy && (data.dailyStudy["2026-09-04"] === 43 * 60 || data.dailyStudy["2026-09-04"] === 2580)) {
+    const hasRealSession = Array.isArray(userStudySessions) && userStudySessions.some(s => getLocalDateString(s.created_at || s.timestamp || s.date) === "2026-09-04");
+    if (!hasRealSession) {
+      delete data.dailyStudy["2026-09-04"];
+      if (data.dailySessions) delete data.dailySessions["2026-09-04"];
+    }
   }
 
   // Clean any historical entries in dailyStudy that exceed 16h
@@ -2378,21 +2381,29 @@ function renderSubjects() {
   const timerSubjSelect = el("timerSubjectSelect");
   if (timerSubjSelect) {
     const currentVal = timerSubjSelect.value || data.activeTimerSubject || "General";
-    const availableNames = Array.from(new Set(["General", ...data.subjects.map(s => s.name)]));
+    const availableNames = Array.from(new Set(["General", ...data.subjects.map(s => typeof s === "string" ? s : s.name)]));
     timerSubjSelect.innerHTML = availableNames.map(name => 
       `<option value="${escapeHtml(name)}"${name === currentVal ? " selected" : ""}>${escapeHtml(name)}</option>`
     ).join("");
   }
 
+  // Synchronize Today's Tasks subject tags dropdown
+  populateTaskSubjectDropdown();
+
   initSubjectListDelegation();
   const fragment = document.createDocumentFragment();
 
   data.subjects.forEach((subject, index) => {
+    const subName = typeof subject === "string" ? subject : subject.name;
     const targetMinutes = Number(subject.targetMinutes) > 0 ? Number(subject.targetMinutes) : 120;
-    subject.targetMinutes = targetMinutes;
-    const studiedMinutes = getSubjectStudiedMinutes(subject.name);
+    if (typeof subject === "object" && subject !== null) {
+      subject.targetMinutes = targetMinutes;
+    }
+    const studiedMinutes = getSubjectStudiedMinutes(subName);
     const percentage = Math.min(100, Math.round((studiedMinutes / targetMinutes) * 100));
-    subject.value = percentage;
+    if (typeof subject === "object" && subject !== null) {
+      subject.value = percentage;
+    }
 
     const color = colorValue(subject.color);
 
@@ -2400,12 +2411,15 @@ function renderSubjects() {
     row.className = "coverage-row";
     row.style.cssText = "margin-bottom: 12px;";
     row.innerHTML = `
-      <div class="subject-item-header">
-        <div class="subject-title-group">
-          <label style="font-weight: 700; font-size: 13px; color: var(--text);">${escapeHtml(subject.name)}</label>
-          <span class="subject-meta-text">${studiedMinutes}m / <button type="button" class="target-mins-btn" data-subject="${escapeHtml(subject.name)}" data-current-mins="${targetMinutes}" data-subject-index="${index}" title="Click to customize target minutes" style="background: none; border: none; padding: 0; color: var(--soft); text-decoration: underline dotted; font-size: inherit; cursor: pointer;">${targetMinutes}m</button></span>
+      <div class="subject-item-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <div class="subject-title-group" style="display: flex; align-items: baseline; gap: 8px;">
+          <label style="font-weight: 700; font-size: 13px; color: var(--text);">${escapeHtml(subName)}</label>
+          <span class="subject-meta-text">${studiedMinutes}m / <button type="button" class="target-mins-btn" data-subject="${escapeHtml(subName)}" data-current-mins="${targetMinutes}" data-subject-index="${index}" title="Click to customize target minutes" style="background: none; border: none; padding: 0; color: var(--soft); text-decoration: underline dotted; font-size: inherit; cursor: pointer;">${targetMinutes}m</button></span>
         </div>
-        <span style="font-size: 12px; font-weight: 700; color: var(--text);">${percentage}%</span>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 12px; font-weight: 700; color: var(--text);">${percentage}%</span>
+          <button type="button" class="delete-subject-btn" data-subject="${escapeHtml(subName)}" data-subject-index="${index}" title="Delete ${escapeHtml(subName)}">×</button>
+        </div>
       </div>
       <div class="coverage-progress-wrap" style="position: relative; height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; border: 1px solid var(--line); margin-top: 6px;">
         <div class="coverage-progress-fill" style="height: 100%; width: ${percentage}%; background: ${color}; border-radius: 4px; transition: width 0.3s ease;"></div>
@@ -2420,10 +2434,19 @@ function renderSubjects() {
 
 function initSubjectListDelegation() {
   const list = el("subjectList");
-  if (!list || list.dataset.delegated) return;
-  list.dataset.delegated = "true";
+  if (!list || (list.dataset && list.dataset.delegated)) return;
+  if (list.dataset) list.dataset.delegated = "true";
 
   list.addEventListener("click", (e) => {
+    const deleteBtn = e.target.closest(".delete-subject-btn");
+    if (deleteBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const subjectName = deleteBtn.getAttribute("data-subject");
+      deleteSubject(subjectName);
+      return;
+    }
+
     const targetBtn = e.target.closest(".target-mins-btn");
     if (targetBtn) {
       e.preventDefault();
@@ -2435,6 +2458,55 @@ function initSubjectListDelegation() {
     }
   });
 }
+
+async function deleteSubject(subjectName) {
+  if (!subjectName || !data || !Array.isArray(data.subjects)) return;
+  const target = String(subjectName).trim();
+  const subjectIndex = data.subjects.findIndex(s => {
+    const name = typeof s === "string" ? s : s.name;
+    return (name || "").trim().toLowerCase() === target.toLowerCase();
+  });
+  if (subjectIndex === -1) return;
+
+  // Check if tasks or decks are currently linked
+  const linkedTasks = (data.tasks || []).filter(t => {
+    const tag = (t.tag || t.subject || "").trim().toLowerCase();
+    return tag === target.toLowerCase();
+  });
+  const linkedDecks = Object.keys(data.flashcardDecks || {}).filter(d => d.toLowerCase().includes(target.toLowerCase()));
+
+  let confirmMsg = `Are you sure you want to delete the subject "${target}"?`;
+  if (linkedTasks.length > 0 || linkedDecks.length > 0) {
+    confirmMsg = `"${target}" is currently linked to ${linkedTasks.length} task(s) and ${linkedDecks.length} deck(s). Are you sure you want to delete it?`;
+  }
+
+  const confirmed = typeof showAppConfirm === "function"
+    ? await showAppConfirm(confirmMsg, "Delete Subject", "Delete", "Cancel")
+    : confirm(confirmMsg);
+
+  if (!confirmed) return;
+
+  data.subjects.splice(subjectIndex, 1);
+  saveUser();
+  renderSubjects();
+  populateTaskSubjectDropdown();
+}
+window.deleteSubject = deleteSubject;
+
+function populateTaskSubjectDropdown() {
+  const select = document.getElementById("taskSubjectSelect") || document.getElementById("taskTagInput");
+  if (!select) return;
+  const currentVal = select.value;
+  const rawSubjects = (data && Array.isArray(data.subjects)) ? data.subjects : [];
+  const subjects = rawSubjects.map(sub => (typeof sub === "string" ? sub : sub.name)).filter(Boolean);
+  const listToRender = subjects.length > 0 ? subjects : ["General"];
+
+  select.innerHTML = listToRender
+    .map(sub => `<option value="${escapeHtml(sub)}"${sub === currentVal ? " selected" : ""}>${escapeHtml(sub)}</option>`)
+    .join("") + `<option value="Other"${currentVal === "Other" ? " selected" : ""}>Other</option>`;
+}
+window.populateTaskSubjectDropdown = populateTaskSubjectDropdown;
+window.renderSubjects = renderSubjects;
 
 function updateSubjectTarget(subjectName, newGoal) {
   if (!data || !Array.isArray(data.subjects)) return;
@@ -3124,9 +3196,13 @@ function getStreakData() {
     });
   }
 
-  // Ensure Friday's (2026-09-04) logged minutes (~43m) persist
-  if (!dailyStudy["2026-09-04"] || dailyStudy["2026-09-04"] < 43 * 60) {
-    dailyStudy["2026-09-04"] = Math.max(dailyStudy["2026-09-04"] || 0, 43 * 60);
+  // Clean up any stale mock Friday seed (43m) if no actual session exists
+  if (dailyStudy["2026-09-04"] === 43 * 60 || dailyStudy["2026-09-04"] === 2580) {
+    const hasRealSession = Array.isArray(userStudySessions) && userStudySessions.some(s => getLocalDateString(s.created_at || s.timestamp || s.date) === "2026-09-04");
+    if (!hasRealSession) {
+      delete dailyStudy["2026-09-04"];
+      if (data && data.dailySessions) delete data.dailySessions["2026-09-04"];
+    }
   }
 
   // If data.studySeconds > 0 for today, ensure today is in dailyStudy
@@ -3211,6 +3287,7 @@ function normalizeData(savedData) {
   normalized.dailyStudy = normalized.dailyStudy || {};
   normalized.dailySessions = normalized.dailySessions || {};
   normalized.sessionsToday = typeof normalized.sessionsToday === 'number' ? normalized.sessionsToday : 0;
+  normalized.weeklyFocusMinutes = normalized.weeklyFocusMinutes || { M: 0, T: 0, W: 0, T2: 0, F: 0, S: 0, S2: 0 };
   normalized.lastActiveDate = normalized.lastActiveDate || "";
   normalized.flashcardDecks = normalized.flashcardDecks || {};
   normalized.currentStudyQueue = Array.isArray(normalized.currentStudyQueue) ? normalized.currentStudyQueue : [];
@@ -8688,7 +8765,8 @@ function bindEvents() {
     const title = el("taskInput").value.trim();
     if (!title) return;
     const color = el("taskColorInput") ? el("taskColorInput").value : "#ff6e79";
-    const tag = el("taskTagInput") ? el("taskTagInput").value : "Review";
+    const tagSelect = el("taskSubjectSelect") || el("taskTagInput");
+    const tag = tagSelect ? tagSelect.value : "Other";
     const todayStr = getLocalDateString();
     const newTask = {
       title,
