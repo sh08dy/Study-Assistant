@@ -456,6 +456,7 @@ try {
 let currentSupabaseUser = null;
 let supabaseRealtimeChannel = null;
 let modalAuthMode = "login";
+let isLoggingOut = false;
 let userStudySessions = [];
 let sharedResourcesList = [];
 let selectedResourceSubjectFilter = "all";
@@ -2032,18 +2033,13 @@ async function login(email, supabaseUser = null) {
   }
 }
 
-async function logout() {
+function handlePostLogoutState() {
   stopTimerLoop();
-  if (supabaseClient) {
+  if (supabaseRealtimeChannel && supabaseClient) {
     try {
-      if (supabaseRealtimeChannel) {
-        supabaseClient.removeChannel(supabaseRealtimeChannel);
-        supabaseRealtimeChannel = null;
-      }
-      await supabaseClient.auth.signOut();
-    } catch (err) {
-      console.warn("Supabase sign out error:", err);
-    }
+      supabaseClient.removeChannel(supabaseRealtimeChannel);
+    } catch (e) {}
+    supabaseRealtimeChannel = null;
   }
 
   // Strictly wipe in-memory data and caches BEFORE UI updates or redirects
@@ -2052,7 +2048,7 @@ async function logout() {
   }
   userStudySessions = [];
   sharedResourcesList = [];
-  data = defaultData();
+  data = typeof defaultData === "function" ? defaultData() : {};
   data.tasks = [];
   data.calendarEvents = [];
   data.flashcardDecks = {};
@@ -2073,7 +2069,9 @@ async function logout() {
   activeEditorNoteId = null;
   activeEditorNoteType = null;
   if (activePdfUrl) {
-    URL.revokeObjectURL(activePdfUrl);
+    try {
+      URL.revokeObjectURL(activePdfUrl);
+    } catch (e) {}
     activePdfUrl = null;
   }
   localStorage.removeItem(`${storeKey}:session`);
@@ -2089,8 +2087,40 @@ async function logout() {
   const authEl = el("authView") || authView;
   if (appEl) appEl.classList.add("hidden");
   if (authEl) authEl.classList.remove("hidden");
+  if (typeof closeAuthModal === "function") closeAuthModal();
+  if (typeof setAuthMode === "function") setAuthMode("login");
   setMessage("");
 }
+window.handlePostLogoutState = handlePostLogoutState;
+
+async function logout() {
+  if (isLoggingOut) return;
+  isLoggingOut = true;
+
+  try {
+    stopTimerLoop();
+    if (supabaseClient) {
+      if (supabaseRealtimeChannel) {
+        try {
+          supabaseClient.removeChannel(supabaseRealtimeChannel);
+        } catch (e) {}
+        supabaseRealtimeChannel = null;
+      }
+      try {
+        await supabaseClient.auth.signOut();
+      } catch (err) {
+        console.warn("Supabase sign out error:", err);
+      }
+    }
+    handlePostLogoutState();
+  } finally {
+    // Reset flag asynchronously after microtasks and auth events finish firing
+    setTimeout(() => {
+      isLoggingOut = false;
+    }, 100);
+  }
+}
+window.logout = logout;
 
 window.devWipeAccount = async () => {
   if (!currentUser) return console.error("No active user");
@@ -9800,12 +9830,15 @@ async function initApp() {
   if (supabaseClient) {
     // 1. Listen for Supabase auth state changes to keep tokens & state updated
     supabaseClient.auth.onAuthStateChange(async (event, session) => {
+      if (isLoggingOut) return;
+      if (event === "SIGNED_OUT") {
+        handlePostLogoutState();
+        return;
+      }
       if (session?.user) {
         currentSupabaseUser = session.user;
         await login(session.user.email, session.user);
         closeAuthModal();
-      } else if (event === "SIGNED_OUT") {
-        logout();
       }
     });
 
