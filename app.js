@@ -739,83 +739,126 @@ function isQuotaExceeded(e) {
   );
 }
 
-function pruneLocalStorageData(key = storeKey, value = null) {
+let quotaExceededWarned = false;
+function handleQuotaExceeded(key) {
+  if (!quotaExceededWarned) {
+    quotaExceededWarned = true;
+    console.warn(`[Storage] localStorage quota reached for '${key}'. Continuing in memory-first mode with IndexedDB and Supabase sync.`);
+  }
+}
+
+// Keep localStorage strictly for lightweight session, counter, and layout state
+function extractLightweightData(fullData) {
+  if (!fullData || typeof fullData !== "object") return {};
+
+  return {
+    studySeconds: Number(fullData.studySeconds) || 0,
+    studyGoal: Number(fullData.studyGoal) || 360,
+    flashcards: Number(fullData.flashcards) || 0,
+    retention: Number(fullData.retention) || 80,
+    focusScore: Number(fullData.focusScore) || 85,
+    streak: fullData.streak !== undefined ? fullData.streak : 0,
+    bestStreak: fullData.bestStreak !== undefined ? fullData.bestStreak : 0,
+    timerMode: fullData.timerMode || "focus",
+    timerRemaining: Number(fullData.timerRemaining) || (25 * 60),
+    timerSession: Number(fullData.timerSession) || 0,
+    timerRunning: false,
+    sound: fullData.sound !== undefined ? fullData.sound : true,
+    focusMode: fullData.focusMode !== undefined ? fullData.focusMode : true,
+    timerFocusDurationMin: Number(fullData.timerFocusDurationMin) || 25,
+    timerBreakDurationMin: Number(fullData.timerBreakDurationMin) || 5,
+    timerTargetSessions: Number(fullData.timerTargetSessions) || 4,
+    autoStartIntervals: Boolean(fullData.autoStartIntervals),
+    sessionsToday: Number(fullData.sessionsToday) || 0,
+    flashcardsToday: Number(fullData.flashcardsToday) || 0,
+    flashcardsGoal: Number(fullData.flashcardsGoal) || 50,
+    flashcardRatings: fullData.flashcardRatings || { easy: 0, good: 0, hard: 0 },
+    lastActiveDate: fullData.lastActiveDate || (typeof getLocalDateString === "function" ? getLocalDateString() : new Date().toLocaleDateString("en-CA")),
+    settings: fullData.settings || {
+      maxNewPerDay: 50,
+      maxReviewsPerDay: 200,
+      dailyFlashcardGoal: 50
+    },
+    dailyStats: fullData.dailyStats || {
+      lastStudyDate: new Date().toLocaleDateString("en-CA"),
+      newCardsStudiedToday: 0,
+      reviewsStudiedToday: 0
+    },
+    subjects: Array.isArray(fullData.subjects) ? fullData.subjects.map(s => ({
+      name: s.name,
+      value: s.value || 0,
+      targetMinutes: s.targetMinutes || 120,
+      color: s.color || "purple",
+      studiedMinutes: s.studiedMinutes || 0
+    })) : [],
+    tasks: Array.isArray(fullData.tasks) ? fullData.tasks.slice(0, 50).map(t => ({
+      title: t.title,
+      tag: t.tag || "Task",
+      done: Boolean(t.done)
+    })) : [],
+    targetExam: fullData.targetExam || null,
+    overviewCardView: fullData.overviewCardView || "year",
+    deckSettings: fullData.deckSettings || {},
+    // Heavy collections are never stored in localStorage
+    flashcardDecks: {},
+    flashcardReviews: [],
+    history: {},
+    dailyStudy: {},
+    dailySessions: {},
+    notesList: [],
+    unlinkedNotes: [],
+    calendarEvents: Array.isArray(fullData.calendarEvents) ? fullData.calendarEvents.slice(0, 30) : [],
+    pendingSyncQueue: Array.isArray(fullData.pendingSyncQueue) ? fullData.pendingSyncQueue.slice(0, 30) : []
+  };
+}
+
+// Persist heavy study collections asynchronously to IndexedDB
+function saveHeavyStudyDataToIDB() {
+  if (!currentUser) return;
+  const userKey = currentUser.id || (typeof currentUser === "string" ? currentUser : currentUser.email);
+  if (!userKey) return;
+
+  if (data?.flashcardReviews && Array.isArray(data.flashcardReviews) && data.flashcardReviews.length > 0) {
+    idb.set(`duepoint_reviews:${userKey}`, data.flashcardReviews).catch(() => {});
+  }
+  if (data?.history && typeof data.history === "object" && Object.keys(data.history).length > 0) {
+    idb.set(`duepoint_history:${userKey}`, data.history).catch(() => {});
+  }
+}
+
+// Asynchronously restore heavy study collections from IndexedDB
+async function loadHeavyStudyDataFromIDB() {
+  if (!currentUser || !data) return;
+  const userKey = currentUser.id || (typeof currentUser === "string" ? currentUser : currentUser.email);
+  if (!userKey) return;
+
   try {
-    let rawObj = value;
-    if (!rawObj) {
-      if (key === storeKey) {
-        rawObj = db;
-      } else {
-        rawObj = data;
+    const reviews = await idb.get(`duepoint_reviews:${userKey}`);
+    if (Array.isArray(reviews) && reviews.length > 0) {
+      if (!Array.isArray(data.flashcardReviews) || data.flashcardReviews.length === 0) {
+        data.flashcardReviews = reviews;
       }
     }
-    if (!rawObj) return false;
-
-    const dataToPrune = JSON.parse(JSON.stringify(rawObj));
-
-    const sanitizeUserData = (userData) => {
-      if (!userData || typeof userData !== "object") return;
-      userData.flashcardDecks = {};
-      if (Array.isArray(userData.flashcardReviews) && userData.flashcardReviews.length > 100) {
-        userData.flashcardReviews = userData.flashcardReviews.slice(-100);
-      }
-      if (Array.isArray(userData.history) && userData.history.length > 100) {
-        userData.history = userData.history.slice(-100);
-      }
-      if (Array.isArray(userData.pendingSyncQueue) && userData.pendingSyncQueue.length > 50) {
-        userData.pendingSyncQueue = userData.pendingSyncQueue.slice(-50);
-      }
-      delete userData.backupHistory;
-      delete userData.cachedPayloads;
-      delete userData.cachedSnapshots;
-    };
-
-    if (dataToPrune.users && typeof dataToPrune.users === "object") {
-      for (const uKey in dataToPrune.users) {
-        if (dataToPrune.users[uKey]?.data) {
-          sanitizeUserData(dataToPrune.users[uKey].data);
-        }
-      }
-    } else {
-      sanitizeUserData(dataToPrune);
-    }
-
-    try {
-      localStorage.setItem(key, JSON.stringify(dataToPrune));
-      console.warn(`Pruned localStorage data for '${key}' to stay within quota.`);
-      return true;
-    } catch (secondErr) {
-      // More aggressive pruning if still exceeding quota
-      if (dataToPrune.users && typeof dataToPrune.users === "object") {
-        for (const uKey in dataToPrune.users) {
-          if (dataToPrune.users[uKey]?.data) {
-            if (Array.isArray(dataToPrune.users[uKey].data.flashcardReviews)) {
-              dataToPrune.users[uKey].data.flashcardReviews = dataToPrune.users[uKey].data.flashcardReviews.slice(-20);
-            }
-            if (Array.isArray(dataToPrune.users[uKey].data.history)) {
-              dataToPrune.users[uKey].data.history = dataToPrune.users[uKey].data.history.slice(-20);
-            }
-          }
-        }
+    const history = await idb.get(`duepoint_history:${userKey}`);
+    if (history && typeof history === "object" && Object.keys(history).length > 0) {
+      if (!data.history || Object.keys(data.history).length === 0) {
+        data.history = history;
       } else {
-        if (Array.isArray(dataToPrune.flashcardReviews)) {
-          dataToPrune.flashcardReviews = dataToPrune.flashcardReviews.slice(-20);
-        }
-        if (Array.isArray(dataToPrune.history)) {
-          dataToPrune.history = dataToPrune.history.slice(-20);
-        }
-      }
-      try {
-        localStorage.setItem(key, JSON.stringify(dataToPrune));
-        console.warn(`Aggressively pruned localStorage data for '${key}'.`);
-        return true;
-      } catch (thirdErr) {
-        console.error(`Unable to save '${key}' even after aggressive pruning:`, thirdErr);
-        return false;
+        data.history = { ...history, ...data.history };
       }
     }
   } catch (err) {
-    console.error(`Error during pruneLocalStorageData for '${key}':`, err);
+    console.warn("Failed to load heavy study data from IndexedDB:", err);
+  }
+}
+
+function pruneLocalStorageData(key = storeKey, value = null) {
+  try {
+    const light = value ? extractLightweightData(value) : extractLightweightData(data);
+    localStorage.setItem(key, JSON.stringify(light));
+    return true;
+  } catch (err) {
+    handleQuotaExceeded(key);
     return false;
   }
 }
@@ -830,25 +873,33 @@ function saveDb(key = storeKey, value = null) {
         const copy = JSON.parse(JSON.stringify(value));
         if (copy && copy.users) {
           for (const u in copy.users) {
-            if (copy.users[u]?.data) copy.users[u].data.flashcardDecks = {};
+            if (copy.users[u]?.data) {
+              copy.users[u].data = extractLightweightData(copy.users[u].data);
+            }
           }
         }
         payloadStr = JSON.stringify(copy);
       }
     } else {
-      const dbCopy = JSON.parse(JSON.stringify(db));
-      for (const email in dbCopy.users) {
-        if (dbCopy.users[email]?.data) {
-          dbCopy.users[email].data.flashcardDecks = {};
+      const lightDb = { users: {} };
+      if (db && db.users) {
+        for (const uKey in db.users) {
+          const u = db.users[uKey];
+          if (u) {
+            lightDb.users[uKey] = {
+              name: u.name,
+              password: u.password,
+              data: extractLightweightData(u.data)
+            };
+          }
         }
       }
-      payloadStr = JSON.stringify(dbCopy);
+      payloadStr = JSON.stringify(lightDb);
     }
     localStorage.setItem(key, payloadStr);
   } catch (err) {
     if (isQuotaExceeded(err)) {
-      console.warn(`QuotaExceededError saving '${key}'. Initiating automatic pruning...`);
-      pruneLocalStorageData(key, value !== null && value !== undefined ? value : db);
+      handleQuotaExceeded(key);
     } else {
       console.warn(`Failed to save '${key}' to localStorage:`, err);
     }
@@ -868,22 +919,26 @@ function saveUser() {
     db.users[userKey].data = data;
   }
 
-  // Scoped user persistence
+  // Persist heavy study collections to IndexedDB
+  saveHeavyStudyDataToIDB();
+
+  // Scoped user persistence - strictly lightweight session & layout state
   try {
     const storageKey = getStorageKey();
-    const dataCopy = JSON.parse(JSON.stringify(data || defaultData()));
-    dataCopy.flashcardDecks = {};
+    const lightweightData = extractLightweightData(data || defaultData());
     try {
-      localStorage.setItem(storageKey, JSON.stringify(dataCopy));
+      localStorage.setItem(storageKey, JSON.stringify(lightweightData));
     } catch (err) {
       if (isQuotaExceeded(err)) {
-        pruneLocalStorageData(storageKey, dataCopy);
+        handleQuotaExceeded(storageKey);
       } else {
         throw err;
       }
     }
   } catch (err) {
-    console.warn("Failed to persist scoped user data:", err);
+    if (!isQuotaExceeded(err)) {
+      console.warn("Failed to persist scoped user data:", err);
+    }
   }
 
   saveDb();
@@ -909,12 +964,56 @@ window.flushDebouncedSaveUser = flushDebouncedSaveUser;
 
 window.addEventListener("beforeunload", flushDebouncedSaveUser);
 
-function saveFlashcardDecks() {
-  if (!currentUser) return;
-  idb.set(`flashcard-decks:${currentUser}`, data.flashcardDecks || {}).catch(err => {
+async function saveFlashcardDecks() {
+  if (!data) return;
+  const decks = data.flashcardDecks || {};
+  try {
+    // Write directly and solely to IndexedDB
+    await idb.set("flashcardDecks", decks);
+    if (currentUser) {
+      const userKey = currentUser.id || (typeof currentUser === "string" ? currentUser : currentUser.email);
+      if (userKey) {
+        await idb.set(`flashcard-decks:${userKey}`, decks);
+      }
+    }
+  } catch (err) {
     console.error("Failed to save decks to IndexedDB:", err);
-  });
+  }
 }
+window.saveFlashcardDecks = saveFlashcardDecks;
+
+async function loadFlashcardDecksAsync() {
+  if (!data) return;
+  try {
+    let decks = null;
+    if (currentUser) {
+      const userKey = currentUser.id || (typeof currentUser === "string" ? currentUser : currentUser.email);
+      if (userKey) {
+        decks = await idb.get(`flashcard-decks:${userKey}`);
+      }
+      if ((!decks || Object.keys(decks).length === 0) && currentUser.email) {
+        decks = await idb.get(`flashcard-decks:${currentUser.email}`);
+      }
+    }
+    if (!decks || Object.keys(decks).length === 0) {
+      decks = await idb.get("flashcardDecks");
+    }
+    if (decks && typeof decks === "object" && Object.keys(decks).length > 0) {
+      data.flashcardDecks = decks;
+      if (typeof normalizeData === "function") {
+        const temp = normalizeData(data);
+        data.flashcardDecks = temp.flashcardDecks;
+        data.deckSettings = temp.deckSettings;
+      }
+    } else if (!data.flashcardDecks) {
+      data.flashcardDecks = {};
+    }
+  } catch (err) {
+    console.error("Failed to load decks asynchronously from IndexedDB:", err);
+    if (!data.flashcardDecks) data.flashcardDecks = {};
+  }
+}
+window.loadFlashcardDecksAsync = loadFlashcardDecksAsync;
 
 // ----------------------------------------------------
 // Supabase Cloud Todos Sync Functions
@@ -1881,16 +1980,9 @@ async function login(email, supabaseUser = null) {
   }
 
   data = normalizeData(loadedData || db.users[userKey]?.data || defaultData());
+  await loadFlashcardDecksAsync();
+  await loadHeavyStudyDataFromIDB();
   loadUserData();
-  
-  try {
-    data.flashcardDecks = await idb.get(`flashcard-decks:${currentUser.id}`) || 
-                          (cleanEmail ? await idb.get(`flashcard-decks:${cleanEmail}`) : null) || 
-                          (rawEmail ? await idb.get(`flashcard-decks:${rawEmail}`) : null) || {};
-  } catch (err) {
-    console.error("Failed to load decks from IndexedDB:", err);
-    data.flashcardDecks = {};
-  }
   
   saveUser();
   const authEl = el("authView") || authView;
@@ -9700,6 +9792,10 @@ function bindEvents() {
 
 async function initApp() {
   bindEvents();
+
+  // Load decks and study data asynchronously from IndexedDB instead of parsing from study-assistant-v1
+  await loadFlashcardDecksAsync();
+  await loadHeavyStudyDataFromIDB();
 
   if (supabaseClient) {
     // 1. Listen for Supabase auth state changes to keep tokens & state updated
