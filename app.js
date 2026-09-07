@@ -457,6 +457,8 @@ let currentSupabaseUser = null;
 let supabaseRealtimeChannel = null;
 let modalAuthMode = "login";
 let isLoggingOut = false;
+let isAppInitialized = false;
+let isAuthProcessing = false;
 let userStudySessions = [];
 let sharedResourcesList = [];
 let selectedResourceSubjectFilter = "all";
@@ -1153,69 +1155,79 @@ async function deleteSupabaseTodo(task) {
 
 function setupSupabaseRealtime(userId) {
   if (!supabaseClient || !userId) return;
-  if (supabaseRealtimeChannel) {
-    try {
-      supabaseClient.removeChannel(supabaseRealtimeChannel);
-    } catch (e) {}
-    supabaseRealtimeChannel = null;
-  }
 
-  try {
-    supabaseRealtimeChannel = supabaseClient
-      .channel("study_assistant_realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "todos",
-          filter: `user_id=eq.${userId}`
-        },
-        () => {
-          fetchUserTodos();
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "events",
-          filter: `user_id=eq.${userId}`
-        },
-        () => {
-          fetchUserEvents();
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "study_sessions",
-          filter: `user_id=eq.${userId}`
-        },
-        () => {
-          fetchUserStudySessions().then(() => {
-            if (typeof renderAnalyticsTab === "function") renderAnalyticsTab();
-          });
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "shared_resources"
-        },
-        () => {
-          fetchSharedResources();
-        }
-      )
-      .subscribe();
-  } catch (err) {
-    console.warn("Could not subscribe to Supabase Realtime:", err);
-  }
+  // Decouple channel subscription to background event loop so WebSocket never blocks the UI thread
+  setTimeout(() => {
+    try {
+      if (supabaseRealtimeChannel) {
+        try {
+          supabaseClient.removeChannel(supabaseRealtimeChannel);
+        } catch (e) {}
+        supabaseRealtimeChannel = null;
+      }
+
+      const channel = supabaseClient.channel(`study_assistant_realtime_${userId}`);
+      channel
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "todos",
+            filter: `user_id=eq.${userId}`
+          },
+          () => {
+            fetchUserTodos();
+          }
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "events",
+            filter: `user_id=eq.${userId}`
+          },
+          () => {
+            fetchUserEvents();
+          }
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "study_sessions",
+            filter: `user_id=eq.${userId}`
+          },
+          () => {
+            fetchUserStudySessions().then(() => {
+              if (typeof renderAnalyticsTab === "function") renderAnalyticsTab();
+            }).catch(() => {});
+          }
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "shared_resources"
+          },
+          () => {
+            fetchSharedResources().catch(() => {});
+          }
+        )
+        .subscribe((status, err) => {
+          if (err) {
+            console.warn("[Realtime] Subscription status notice:", status, err);
+          }
+        });
+
+      supabaseRealtimeChannel = channel;
+    } catch (err) {
+      console.warn("Could not subscribe to Supabase Realtime in background:", err);
+    }
+  }, 50);
 }
 
 // ----------------------------------------------------
@@ -2034,6 +2046,8 @@ async function login(email, supabaseUser = null) {
 }
 
 function handlePostLogoutState() {
+  isAppInitialized = false;
+  isAuthProcessing = false;
   stopTimerLoop();
   if (supabaseRealtimeChannel && supabaseClient) {
     try {
@@ -9820,6 +9834,42 @@ function bindEvents() {
   }
 }
 
+async function initGuestOrCachedState() {
+  if (currentUser && data) {
+    await login(currentUser);
+    closeAuthModal();
+    return;
+  }
+
+  // If no active session, show the login view
+  setAuthMode("login");
+  const authEl = el("authView") || authView;
+  const appEl = el("appView") || appView;
+  if (authEl) authEl.classList.remove("hidden");
+  if (appEl) appEl.classList.add("hidden");
+}
+
+async function initializeApplication(user) {
+  if (isAuthProcessing) return;
+  if (isAppInitialized && user && currentUser && currentUser.id === user.id) return;
+  isAuthProcessing = true;
+  try {
+    if (user) {
+      currentSupabaseUser = user;
+      await login(user.email, user);
+      closeAuthModal();
+    } else {
+      await initGuestOrCachedState();
+    }
+    isAppInitialized = true;
+  } catch (err) {
+    console.error("Error during initializeApplication:", err);
+  } finally {
+    isAuthProcessing = false;
+  }
+}
+window.initializeApplication = initializeApplication;
+
 async function initApp() {
   bindEvents();
 
@@ -9831,27 +9881,32 @@ async function initApp() {
     // 1. Listen for Supabase auth state changes to keep tokens & state updated
     supabaseClient.auth.onAuthStateChange(async (event, session) => {
       if (isLoggingOut) return;
+
       if (event === "SIGNED_OUT") {
         handlePostLogoutState();
         return;
       }
+
       if (session?.user) {
-        currentSupabaseUser = session.user;
-        await login(session.user.email, session.user);
+        // If already logged in as this user, do not re-run full boot pipeline
+        if (currentUser && currentUser.id === session.user.id && isAppInitialized) {
+          return;
+        }
+        await initializeApplication(session.user);
         closeAuthModal();
       }
     });
 
     // 2. Fetch public shared resources
-    fetchSharedResources();
+    fetchSharedResources().catch(() => {});
 
     // 3. Immediately restore session via getSession() inside DOMContentLoaded
     try {
       const { data: { session }, error } = await supabaseClient.auth.getSession();
       if (session?.user) {
-        currentSupabaseUser = session.user;
-        await login(session.user.email, session.user);
-        closeAuthModal();
+        if (!isAppInitialized) {
+          await initializeApplication(session.user);
+        }
         return;
       }
     } catch (err) {
@@ -9859,19 +9914,10 @@ async function initApp() {
     }
   }
 
-  // 4. Fallback to local session if present
-  if (currentUser && data) {
-    await login(currentUser);
-    closeAuthModal();
-    return;
+  // 4. Fallback if not initialized by Supabase session
+  if (!isAppInitialized) {
+    await initializeApplication(null);
   }
-
-  // 5. If no active session, show the login view
-  setAuthMode("login");
-  const authEl = el("authView") || authView;
-  const appEl = el("appView") || appView;
-  if (authEl) authEl.classList.remove("hidden");
-  if (appEl) appEl.classList.add("hidden");
 }
 
 if (document.readyState === "loading") {
