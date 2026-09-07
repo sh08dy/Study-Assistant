@@ -327,6 +327,10 @@ window.getDailyRemainingLimits = getDailyRemainingLimits;
 window.updateDailyLimitBadge = updateDailyLimitBadge;
 
 window.devAdvanceTime = (days = 1) => {
+  if (typeof window !== "undefined" && !window.__DEV_MODE__ && (window.location?.hostname && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1" && window.location.protocol !== "file:")) {
+    console.warn("devAdvanceTime is disabled in production.");
+    return;
+  }
   const ONE_DAY = 24 * 60 * 60 * 1000;
   const shiftMs = (Number(days) || 1) * ONE_DAY;
 
@@ -431,7 +435,8 @@ const defaultData = () => ({
     title: "USMLE Step 1 Exam",
     targetDate: "2026-11-15T09:00"
   },
-  overviewCardView: "year"
+  overviewCardView: "year",
+  pendingSyncQueue: []
 });
 
 // Supabase Cloud Configuration
@@ -1829,7 +1834,10 @@ async function logout() {
 
 window.devWipeAccount = async () => {
   if (!currentUser) return console.error("No active user");
-  console.log("Wiping account data for:", currentUser.id);
+  if (typeof window !== "undefined" && !window.__DEV_MODE__ && (window.location?.hostname && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1" && window.location.protocol !== "file:")) {
+    console.warn("devWipeAccount is disabled in production.");
+    return;
+  }
   
   // 1. Delete all Supabase rows for this user
   if (typeof supabaseClient !== 'undefined' && supabaseClient) {
@@ -1853,6 +1861,255 @@ window.devWipeAccount = async () => {
     window.location.reload();
   }
 };
+
+/* ==========================================================================
+   Data Safety: JSON Backup & Restore
+   ========================================================================== */
+function exportUserDataBackup() {
+  if (!data) return;
+
+  const backupData = {
+    version: 1,
+    app: "DuePoint",
+    exportedAt: new Date().toISOString(),
+    flashcardDecks: data.flashcardDecks || {},
+    subjects: data.subjects || [],
+    history: data.history || {},
+    dailyStats: data.dailyStats || {},
+    settings: data.settings || {},
+    dailyStudy: data.dailyStudy || {},
+    dailySessions: data.dailySessions || {},
+    weeklyFocusMinutes: data.weeklyFocusMinutes || {},
+    streak: data.streak || {},
+    tasks: data.tasks || [],
+    calendarEvents: data.calendarEvents || [],
+    deckSettings: data.deckSettings || {},
+    activeTimerSubject: data.activeTimerSubject || "",
+    sound: data.sound !== undefined ? data.sound : true
+  };
+
+  const todayStr = typeof getLocalDateString === "function" ? getLocalDateString() : new Date().toISOString().slice(0, 10);
+  const filename = `duepoint-backup-${todayStr}.json`;
+
+  const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function handleImportFileInput(event) {
+  const file = event.target && event.target.files && event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const contents = e.target.result;
+      const parsed = JSON.parse(contents);
+
+      // Validate essential keys exist
+      if (!parsed || typeof parsed !== "object" || !parsed.flashcardDecks || typeof parsed.flashcardDecks !== "object") {
+        await showAppAlert("The selected backup file is missing essential flashcard deck data or is formatted incorrectly.", "Invalid Backup");
+        if (event.target) event.target.value = "";
+        return;
+      }
+
+      // Confirmation warning that restoring will overwrite current local progress
+      const confirmed = await showAppConfirm(
+        "Restoring from backup will overwrite your current local flashcards, history, and study progress. Are you sure you want to proceed?",
+        "Restore from Backup",
+        "Restore",
+        "Cancel"
+      );
+
+      if (!confirmed) {
+        if (event.target) event.target.value = "";
+        return;
+      }
+
+      // Update data state
+      data.flashcardDecks = parsed.flashcardDecks || {};
+      if (parsed.subjects) data.subjects = parsed.subjects;
+      if (parsed.history) data.history = parsed.history;
+      if (parsed.dailyStats) data.dailyStats = parsed.dailyStats;
+      if (parsed.settings) data.settings = parsed.settings;
+      if (parsed.dailyStudy) data.dailyStudy = parsed.dailyStudy;
+      if (parsed.dailySessions) data.dailySessions = parsed.dailySessions;
+      if (parsed.weeklyFocusMinutes) data.weeklyFocusMinutes = parsed.weeklyFocusMinutes;
+      if (parsed.streak) data.streak = parsed.streak;
+      if (parsed.tasks) data.tasks = parsed.tasks;
+      if (parsed.calendarEvents) data.calendarEvents = parsed.calendarEvents;
+      if (parsed.deckSettings) data.deckSettings = parsed.deckSettings;
+      if (parsed.activeTimerSubject) data.activeTimerSubject = parsed.activeTimerSubject;
+      if (parsed.sound !== undefined) data.sound = parsed.sound;
+
+      // Execute normalizeData()
+      if (typeof normalizeData === "function") {
+        data = normalizeData(data);
+      }
+
+      // Save to storage / Supabase
+      saveFlashcardDecks();
+      saveUser();
+
+      // Invalidate caches and re-render
+      if (typeof invalidateAnalyticsCache === "function") {
+        invalidateAnalyticsCache();
+      }
+      if (typeof renderAll === "function") {
+        renderAll();
+      }
+      if (typeof renderFlashcardsTab === "function") {
+        renderFlashcardsTab();
+      }
+      if (typeof renderDeckList === "function") {
+        renderDeckList();
+      }
+      if (typeof renderSubjects === "function") {
+        renderSubjects();
+      }
+      if (typeof renderTasks === "function") {
+        renderTasks();
+      }
+
+      await showAppAlert("Your study data and flashcards have been successfully restored!", "Backup Restored");
+    } catch (err) {
+      console.error("Failed to parse backup JSON file:", err);
+      await showAppAlert("An error occurred while reading or parsing the backup file: " + (err.message || err), "Restore Error");
+    } finally {
+      if (event.target) event.target.value = "";
+    }
+  };
+
+  reader.onerror = async () => {
+    console.error("FileReader error:", reader.error);
+    await showAppAlert("Failed to read the selected backup file.", "Read Error");
+    if (event.target) event.target.value = "";
+  };
+
+  reader.readAsText(file);
+}
+
+window.exportUserDataBackup = exportUserDataBackup;
+window.handleImportFileInput = handleImportFileInput;
+
+/* ==========================================================================
+   Offline-Resilient Review Sync Queue
+   ========================================================================== */
+function queuePendingSync(payload) {
+  if (!data) return;
+  data.pendingSyncQueue = data.pendingSyncQueue || [];
+  data.pendingSyncQueue.push(payload);
+  savePendingSyncQueue();
+}
+
+function savePendingSyncQueue() {
+  try {
+    const queueKey = 'duepoint_pending_sync_' + (currentUser?.id || (typeof currentUser === 'string' ? currentUser : 'guest'));
+    localStorage.setItem(queueKey, JSON.stringify(data?.pendingSyncQueue || []));
+  } catch (err) {
+    console.error("Failed to save pending sync queue to local storage:", err);
+  }
+}
+
+function loadPendingSyncQueue() {
+  if (!data) return;
+  try {
+    const queueKey = 'duepoint_pending_sync_' + (currentUser?.id || (typeof currentUser === 'string' ? currentUser : 'guest'));
+    const stored = localStorage.getItem(queueKey);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) {
+        data.pendingSyncQueue = parsed;
+      }
+    }
+  } catch (err) {
+    console.error("Failed to load pending sync queue from local storage:", err);
+  }
+  data.pendingSyncQueue = data.pendingSyncQueue || [];
+}
+
+function syncOrQueueCardReview(payload) {
+  if (!navigator.onLine || !supabaseClient || !currentSupabaseUser) {
+    queuePendingSync(payload);
+    return;
+  }
+  supabaseClient
+    .from("flashcard_reviews")
+    .insert([{
+      user_id: currentSupabaseUser.id,
+      deck_name: payload.deckName,
+      card_id: String(payload.cardId),
+      rating: payload.rating,
+      interval: payload.interval,
+      reps: payload.reps,
+      reviewed_at: new Date(payload.timestamp).toISOString()
+    }])
+    .then(({ error }) => {
+      if (error) {
+        console.error("Supabase review sync error, queueing:", error.message || error);
+        queuePendingSync(payload);
+      }
+    })
+    .catch((err) => {
+      console.error("Supabase review sync failure, queueing:", err);
+      queuePendingSync(payload);
+    });
+}
+
+let isFlushingSyncQueue = false;
+async function flushPendingSyncQueue() {
+  if (isFlushingSyncQueue) return;
+  if (!data || !Array.isArray(data.pendingSyncQueue) || data.pendingSyncQueue.length === 0) return;
+  if (!navigator.onLine || !supabaseClient || !currentSupabaseUser) return;
+
+  isFlushingSyncQueue = true;
+  try {
+    while (data.pendingSyncQueue && data.pendingSyncQueue.length > 0) {
+      const item = data.pendingSyncQueue[0];
+      try {
+        if (item.type === "card_review") {
+          const { error } = await supabaseClient
+            .from("flashcard_reviews")
+            .insert([{
+              user_id: currentSupabaseUser.id,
+              deck_name: item.deckName,
+              card_id: String(item.cardId),
+              rating: item.rating,
+              interval: item.interval,
+              reps: item.reps,
+              reviewed_at: new Date(item.timestamp).toISOString()
+            }]);
+
+          if (error) {
+            console.error("Failed to flush review to Supabase:", error.message || error);
+            break; // Stop flushing until next reconnection
+          }
+        }
+        data.pendingSyncQueue.shift();
+        savePendingSyncQueue();
+      } catch (itemErr) {
+        console.error("Error flushing item from pending sync queue:", itemErr);
+        break;
+      }
+    }
+  } finally {
+    isFlushingSyncQueue = false;
+    savePendingSyncQueue();
+  }
+}
+
+window.addEventListener('online', flushPendingSyncQueue);
+window.flushPendingSyncQueue = flushPendingSyncQueue;
+window.queuePendingSync = queuePendingSync;
+window.syncOrQueueCardReview = syncOrQueueCardReview;
+window.savePendingSyncQueue = savePendingSyncQueue;
+window.loadPendingSyncQueue = loadPendingSyncQueue;
 
 function renderAll() {
   renderDate();
@@ -2244,9 +2501,7 @@ function syncAmbientAudio() {
     if (!ambientAudioUserPaused && player.paused) {
       const playPromise = player.play();
       if (playPromise && typeof playPromise.catch === "function") {
-        playPromise.catch((err) => {
-          console.log("Ambient audio autoplay deferred:", err);
-        });
+        playPromise.catch(() => {});
       }
     }
   } else {
@@ -2272,7 +2527,7 @@ function initAmbientAudio() {
       if (wasPlaying || (data && data.timerRunning && data.timerMode === "focus" && !ambientAudioUserPaused && data.sound !== false)) {
         const playPromise = player.play();
         if (playPromise && typeof playPromise.catch === "function") {
-          playPromise.catch((err) => console.log("Ambient audio track switch play error:", err));
+          playPromise.catch(() => {});
         }
       }
       updateAmbientAudioUI();
@@ -2289,7 +2544,7 @@ function initAmbientAudio() {
         if (data) data.sound = true;
         const playPromise = player.play();
         if (playPromise && typeof playPromise.catch === "function") {
-          playPromise.catch((err) => console.log("Ambient audio manual play error:", err));
+          playPromise.catch(() => {});
         }
       } else {
         ambientAudioUserPaused = true;
@@ -3047,7 +3302,7 @@ function completeTimerSession(options = {}) {
       }
       renderSubjects();
     } else {
-      console.log(`Focus session ended early (${actualSecondsElapsed}s elapsed < 60s). Discarded to prevent inflating stats.`);
+      // Short focus session (< 60s); discarded to prevent inflating stats
     }
 
     data.timerMode = "break";
@@ -3397,6 +3652,7 @@ function normalizeData(savedData) {
   normalized.isHost = currentUser === "host@example.com" || !!normalized.isHost;
   normalized.week = Array.isArray(normalized.week) ? normalized.week.slice(0, 7) : defaults.week;
   while (normalized.week.length < 7) normalized.week.push(false);
+  normalized.pendingSyncQueue = Array.isArray(savedData && savedData.pendingSyncQueue) ? savedData.pendingSyncQueue : (Array.isArray(normalized.pendingSyncQueue) ? normalized.pendingSyncQueue : []);
   return normalized;
 }
 
@@ -3786,7 +4042,10 @@ function switchView(viewId) {
     "resourcesview": "Resources",
     "analytics": "Analytics",
     "analyticspage": "Analytics",
-    "analyticsview": "Analytics"
+    "analyticsview": "Analytics",
+    "settings": "Settings",
+    "settingspage": "Settings",
+    "settingsview": "Settings"
   };
   const normalizedPage = pageMap[viewId.toLowerCase()] || viewId;
 
@@ -3808,7 +4067,8 @@ function switchView(viewId) {
         "Flashcards": el("flashcardsPage") || el("flashcardsView"),
         "Calendar": el("calendarPage") || el("calendarView"),
         "Resources": el("resourcesPage") || el("resourcesView"),
-        "Analytics": el("analyticsPage") || el("analyticsView")
+        "Analytics": el("analyticsPage") || el("analyticsView"),
+        "Settings": el("settingsPage") || el("settingsView")
       };
 
       document.querySelectorAll(".page-view, .view-container").forEach(view => {
@@ -7634,6 +7894,23 @@ function rateCard(rating) {
   }
   debouncedSaveUser(400);
   
+  // Offline-resilient sync: sync review immediately or queue for reconnect
+  if (card) {
+    syncOrQueueCardReview({
+      type: "card_review",
+      id: "sync_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8),
+      deckName: (typeof currentStudyDeck !== "undefined" ? currentStudyDeck : "") || "",
+      cardId: card.id || card.front || "card",
+      rating: ratingKey,
+      interval: card.interval,
+      reps: card.reps,
+      ease: card.ease,
+      dueDate: card.dueDate,
+      lastReviewed: card.lastReviewed,
+      timestamp: Date.now()
+    });
+  }
+  
   // 4. Render the next card in the queue (or congratulatory screen if queue is empty)
   cardFlipped = false;
   renderActiveCard();
@@ -7887,6 +8164,16 @@ function getCommandPaletteItems(query = "") {
     keywords: ["analytics", "stats", "charts", "heatmap", "graphs", "go"],
     action: () => {
       switchView("Analytics");
+    }
+  });
+
+  items.push({
+    id: "nav-settings",
+    title: "Go to Settings",
+    badge: "Navigation",
+    keywords: ["settings", "preferences", "config", "backup", "restore", "data", "export", "import", "go"],
+    action: () => {
+      switchView("Settings");
     }
   });
 
@@ -8308,6 +8595,32 @@ function bindEvents() {
     });
   });
 
+  // Settings & Data Management (Export / Import Backup)
+  const exportDataBtn = el("exportDataBtn");
+  if (exportDataBtn) {
+    exportDataBtn.addEventListener("click", exportUserDataBackup);
+  }
+
+  const importDataBtn = el("importDataBtn");
+  const importFileInput = el("importFileInput");
+  if (importDataBtn && importFileInput) {
+    importDataBtn.addEventListener("click", () => {
+      importFileInput.click();
+    });
+    importFileInput.addEventListener("change", handleImportFileInput);
+  }
+
+  const settingsBtn = el("settingsButton");
+  if (settingsBtn) {
+    settingsBtn.addEventListener("click", () => switchView("Settings"));
+  }
+
+  // Load and flush offline sync queue
+  loadPendingSyncQueue();
+  if (navigator.onLine) {
+    flushPendingSyncQueue();
+  }
+
   // Analytics 7-Day vs. 30-Day Range Switcher
   const analyticsTimeBtns = document.querySelectorAll(".analytics-time-toggle .time-toggle-btn");
   analyticsTimeBtns.forEach(btn => {
@@ -8526,7 +8839,7 @@ function bindEvents() {
           if (trackSelect && trackSelect.value && !player.src) {
             player.src = trackSelect.value;
           }
-          player.play().catch(e => console.log("Ambient audio autoplay deferred:", e));
+          player.play().catch(() => {});
         }
       }
     }

@@ -64,7 +64,7 @@
         <span class="nav-divider"></span>
         <button class="nav-item" data-page="Analytics" title="Analytics">▥</button>
         <div class="sidebar-bottom">
-            <button id="settingsButton" class="nav-item" title="Settings">⚙</button>
+          <button id="settingsButton" class="nav-item" data-page="Settings" title="Settings">⚙</button>
           <button id="userButton" class="avatar" title="Account">DP</button>
         </div>
       </aside>
@@ -616,6 +616,27 @@
                 <!-- Renders Month grid, Week slots, Day view, or Agenda dynamically -->
               </div>
             </article>
+          </div>
+        </section>
+
+        <!-- Settings Tab -->
+        <section id="settingsPage" class="page-view hidden">
+          <div class="settings-layout" style="display: flex; flex-direction: column; gap: 20px; padding: 20px; overflow-y: auto; height: 100%; max-width: 800px;">
+            <div class="settings-header">
+              <h2 style="margin: 0; font-size: 20px; font-weight: 700; color: var(--text);">Settings</h2>
+              <p style="margin: 4px 0 0; font-size: 12px; color: var(--muted);">Manage your application preferences, study configuration, and data backups.</p>
+            </div>
+
+            <!-- Data & Backup Card -->
+            <div class="settings-card">
+              <h3>Data Management</h3>
+              <p class="text-muted">Export your flashcards, history, and study progress as a JSON snapshot or restore an existing backup.</p>
+              <div style="display: flex; gap: 12px; margin-top: 12px;">
+                <button id="exportDataBtn" class="btn btn-secondary">Export Backup (.json)</button>
+                <button id="importDataBtn" class="btn btn-secondary">Restore from Backup</button>
+                <input type="file" id="importFileInput" accept=".json" style="display: none;" />
+              </div>
+            </div>
           </div>
         </section>
       </section>
