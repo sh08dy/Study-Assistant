@@ -69,6 +69,17 @@ const idb = {
   }
 };
 
+function getIDBUserKey() {
+  const u = (typeof currentUser !== "undefined" && currentUser) || (typeof window !== "undefined" && window.currentUser) || (typeof globalThis !== "undefined" && globalThis.currentUser);
+  const s = (typeof currentSupabaseUser !== "undefined" && currentSupabaseUser) || (typeof window !== "undefined" && window.currentSupabaseUser) || (typeof globalThis !== "undefined" && globalThis.currentSupabaseUser);
+  const userKey = u?.id || (typeof u === "string" ? u : null) || u?.email;
+  if (userKey) return userKey;
+  const supaKey = s?.id || s?.email;
+  if (supaKey) return supaKey;
+  return "guest";
+}
+window.getIDBUserKey = getIDBUserKey;
+
 let currentStudyDeck = null;
 let currentStudyCards = [];
 let currentCardIndex = 0;
@@ -818,7 +829,7 @@ function extractLightweightData(fullData) {
 // Persist heavy study collections asynchronously to IndexedDB
 function saveHeavyStudyDataToIDB() {
   if (!currentUser) return;
-  const userKey = currentUser.id || (typeof currentUser === "string" ? currentUser : currentUser.email);
+  const userKey = typeof getIDBUserKey === "function" ? getIDBUserKey() : (currentUser?.id || currentUser?.email || "guest");
   if (!userKey) return;
 
   if (data?.flashcardReviews && Array.isArray(data.flashcardReviews) && data.flashcardReviews.length > 0) {
@@ -832,7 +843,7 @@ function saveHeavyStudyDataToIDB() {
 // Asynchronously restore heavy study collections from IndexedDB
 async function loadHeavyStudyDataFromIDB() {
   if (!currentUser || !data) return;
-  const userKey = currentUser.id || (typeof currentUser === "string" ? currentUser : currentUser.email);
+  const userKey = typeof getIDBUserKey === "function" ? getIDBUserKey() : (currentUser?.id || currentUser?.email || "guest");
   if (!userKey) return;
 
   try {
@@ -968,55 +979,181 @@ window.flushDebouncedSaveUser = flushDebouncedSaveUser;
 window.addEventListener("beforeunload", flushDebouncedSaveUser);
 
 async function saveFlashcardDecks() {
-  if (!data) return;
-  const decks = data.flashcardDecks || {};
+  const activeData = (typeof data !== "undefined" && data) || (typeof window !== "undefined" && window.data) || (typeof globalThis !== "undefined" && globalThis.data);
+  if (!activeData) return;
+  const decks = activeData.flashcardDecks || {};
   try {
-    // Write directly and solely to IndexedDB
-    await idb.set("flashcardDecks", decks);
-    if (currentUser) {
-      const userKey = currentUser.id || (typeof currentUser === "string" ? currentUser : currentUser.email);
-      if (userKey) {
-        await idb.set(`flashcard-decks:${userKey}`, decks);
-      }
+    const userKey = typeof getIDBUserKey === "function" ? getIDBUserKey() : (currentUser?.id || currentUser?.email || "guest");
+    await idb.set(`flashcard-decks:${userKey}`, decks);
+    await idb.set("flashcardDecks", decks); // global fallback
+    const u = (typeof currentUser !== "undefined" && currentUser) || (typeof window !== "undefined" && window.currentUser);
+    if (u?.email && u.email !== userKey) {
+      await idb.set(`flashcard-decks:${u.email}`, decks);
     }
   } catch (err) {
     console.error("Failed to save decks to IndexedDB:", err);
+  }
+  if (typeof scheduleSupabaseDecksSync === "function") {
+    scheduleSupabaseDecksSync();
   }
 }
 window.saveFlashcardDecks = saveFlashcardDecks;
 
 async function loadFlashcardDecksAsync() {
-  if (!data) return;
+  let activeData = (typeof data !== "undefined" && data) || (typeof window !== "undefined" && window.data) || (typeof globalThis !== "undefined" && globalThis.data);
+  if (!activeData) {
+    if (typeof data !== "undefined") {
+      data = typeof defaultData === "function" ? defaultData() : { flashcardDecks: {} };
+      activeData = data;
+    } else {
+      activeData = { flashcardDecks: {} };
+    }
+  }
   try {
-    let decks = null;
-    if (currentUser) {
-      const userKey = currentUser.id || (typeof currentUser === "string" ? currentUser : currentUser.email);
-      if (userKey) {
-        decks = await idb.get(`flashcard-decks:${userKey}`);
-      }
-      if ((!decks || Object.keys(decks).length === 0) && currentUser.email) {
-        decks = await idb.get(`flashcard-decks:${currentUser.email}`);
-      }
+    const userKey = typeof getIDBUserKey === "function" ? getIDBUserKey() : (currentUser?.id || currentUser?.email || "guest");
+    let loadedDecks = await idb.get(`flashcard-decks:${userKey}`);
+    const u = (typeof currentUser !== "undefined" && currentUser) || (typeof window !== "undefined" && window.currentUser);
+    if ((!loadedDecks || Object.keys(loadedDecks).length === 0) && u?.email && u.email !== userKey) {
+      loadedDecks = await idb.get(`flashcard-decks:${u.email}`);
     }
-    if (!decks || Object.keys(decks).length === 0) {
-      decks = await idb.get("flashcardDecks");
+    if (!loadedDecks || Object.keys(loadedDecks).length === 0) {
+      loadedDecks = await idb.get("flashcardDecks");
     }
-    if (decks && typeof decks === "object" && Object.keys(decks).length > 0) {
-      data.flashcardDecks = decks;
+
+    activeData.flashcardDecks = loadedDecks || {};
+    if (typeof data !== "undefined" && data) {
+      data.flashcardDecks = activeData.flashcardDecks;
+    }
+    if (loadedDecks && typeof loadedDecks === "object" && Object.keys(loadedDecks).length > 0) {
       if (typeof normalizeData === "function") {
-        const temp = normalizeData(data);
-        data.flashcardDecks = temp.flashcardDecks;
-        data.deckSettings = temp.deckSettings;
+        const temp = normalizeData(activeData);
+        activeData.flashcardDecks = temp.flashcardDecks;
+        if (temp.deckSettings) activeData.deckSettings = temp.deckSettings;
+        if (typeof data !== "undefined" && data) {
+          data.flashcardDecks = activeData.flashcardDecks;
+          if (temp.deckSettings) data.deckSettings = temp.deckSettings;
+        }
       }
-    } else if (!data.flashcardDecks) {
-      data.flashcardDecks = {};
     }
+    return activeData.flashcardDecks;
   } catch (err) {
     console.error("Failed to load decks asynchronously from IndexedDB:", err);
-    if (!data.flashcardDecks) data.flashcardDecks = {};
+    if (!activeData.flashcardDecks) activeData.flashcardDecks = {};
+    if (typeof data !== "undefined" && data && !data.flashcardDecks) data.flashcardDecks = {};
+    return activeData.flashcardDecks;
   }
 }
 window.loadFlashcardDecksAsync = loadFlashcardDecksAsync;
+
+// Explicit deck and overview re-render triggers
+function renderDecks() {
+  if (typeof renderDeckList === "function") renderDeckList();
+  if (typeof renderFlashcardsTab === "function") renderFlashcardsTab();
+}
+function renderFlashcardOverview() {
+  if (typeof renderFlashcardsTab === "function") renderFlashcardsTab();
+  if (typeof renderStats === "function") renderStats();
+}
+function updateStatsSummary() {
+  if (typeof renderStats === "function") renderStats();
+  if (typeof updateSidebarUI === "function") updateSidebarUI();
+}
+window.renderDecks = renderDecks;
+window.renderFlashcardOverview = renderFlashcardOverview;
+window.updateStatsSummary = updateStatsSummary;
+
+// Remote Supabase Deck Background Sync & Fetch
+let syncDecksTimeout = null;
+function scheduleSupabaseDecksSync(delay = 1000) {
+  if (syncDecksTimeout) clearTimeout(syncDecksTimeout);
+  syncDecksTimeout = setTimeout(() => {
+    syncDecksTimeout = null;
+    syncDecksToSupabase();
+  }, delay);
+}
+window.scheduleSupabaseDecksSync = scheduleSupabaseDecksSync;
+
+async function syncDecksToSupabase() {
+  const activeData = (typeof data !== "undefined" && data) || (typeof window !== "undefined" && window.data) || (typeof globalThis !== "undefined" && globalThis.data);
+  const supaUser = (typeof currentSupabaseUser !== "undefined" && currentSupabaseUser) || (typeof window !== "undefined" && window.currentSupabaseUser) || (typeof globalThis !== "undefined" && globalThis.currentSupabaseUser);
+  const client = (typeof supabaseClient !== "undefined" && supabaseClient) || (typeof window !== "undefined" && window.supabaseClient) || (typeof globalThis !== "undefined" && globalThis.supabaseClient);
+  if (!navigator.onLine || !client || !supaUser) return;
+  const decks = (activeData && activeData.flashcardDecks) ? activeData.flashcardDecks : {};
+  const userId = supaUser.id;
+
+  try {
+    const { error: err1 } = await client
+      .from("study_data")
+      .upsert({
+        user_id: userId,
+        key: "flashcard_decks",
+        data: decks,
+        updated_at: new Date().toISOString()
+      }, { onConflict: "user_id,key" });
+
+    if (err1) {
+      const { error: err2 } = await client
+        .from("user_data")
+        .upsert({
+          user_id: userId,
+          flashcard_decks: decks,
+          updated_at: new Date().toISOString()
+        }, { onConflict: "user_id" });
+
+      if (err2) {
+        await client
+          .from("user_data")
+          .upsert({
+            user_id: userId,
+            data: { flashcardDecks: decks },
+            updated_at: new Date().toISOString()
+          }, { onConflict: "user_id" })
+          .catch(() => {});
+      }
+    }
+  } catch (err) {
+    console.warn("Background sync of flashcard decks to Supabase skipped or failed:", err);
+  }
+}
+window.syncDecksToSupabase = syncDecksToSupabase;
+
+async function fetchRemoteDecksFromSupabase() {
+  const supaUser = (typeof currentSupabaseUser !== "undefined" && currentSupabaseUser) || (typeof window !== "undefined" && window.currentSupabaseUser) || (typeof globalThis !== "undefined" && globalThis.currentSupabaseUser);
+  const client = (typeof supabaseClient !== "undefined" && supabaseClient) || (typeof window !== "undefined" && window.supabaseClient) || (typeof globalThis !== "undefined" && globalThis.supabaseClient);
+  if (!navigator.onLine || !client || !supaUser) return null;
+  try {
+    const { data: studyRows, error: err1 } = await client
+      .from("study_data")
+      .select("data")
+      .eq("user_id", supaUser.id)
+      .eq("key", "flashcard_decks")
+      .maybeSingle();
+
+    if (!err1 && studyRows?.data && typeof studyRows.data === "object" && Object.keys(studyRows.data).length > 0) {
+      return studyRows.data;
+    }
+
+    const { data: userRows, error: err2 } = await client
+      .from("user_data")
+      .select("flashcard_decks, data")
+      .eq("user_id", supaUser.id)
+      .maybeSingle();
+
+    if (!err2 && userRows) {
+      if (userRows.flashcard_decks && typeof userRows.flashcard_decks === "object" && Object.keys(userRows.flashcard_decks).length > 0) {
+        return userRows.flashcard_decks;
+      }
+      if (userRows.data?.flashcardDecks && typeof userRows.data.flashcardDecks === "object" && Object.keys(userRows.data.flashcardDecks).length > 0) {
+        return userRows.data.flashcardDecks;
+      }
+    }
+  } catch (err) {
+    console.warn("Could not fetch remote decks from Supabase:", err);
+  }
+  return null;
+}
+window.fetchRemoteDecksFromSupabase = fetchRemoteDecksFromSupabase;
+
 
 // ----------------------------------------------------
 // Supabase Cloud Todos Sync Functions
@@ -1993,7 +2130,15 @@ async function login(email, supabaseUser = null) {
   }
 
   data = normalizeData(loadedData || db.users[userKey]?.data || defaultData());
-  await loadFlashcardDecksAsync();
+  const decks = await loadFlashcardDecksAsync();
+  if (decks && Object.keys(decks).length > 0) {
+    data.flashcardDecks = decks;
+  }
+  // Explicitly trigger deck re-renders once IndexedDB resolves:
+  if (typeof renderDecks === 'function') renderDecks();
+  if (typeof renderFlashcardOverview === 'function') renderFlashcardOverview();
+  if (typeof updateStatsSummary === 'function') updateStatsSummary();
+
   await loadHeavyStudyDataFromIDB();
   loadUserData();
   
@@ -2037,6 +2182,18 @@ async function login(email, supabaseUser = null) {
         fetchUserEvents(),
         fetchUserStudySessions()
       ]);
+      if (!data.flashcardDecks || Object.keys(data.flashcardDecks).length === 0) {
+        try {
+          const remoteDecks = await fetchRemoteDecksFromSupabase();
+          if (remoteDecks && Object.keys(remoteDecks).length > 0) {
+            data.flashcardDecks = remoteDecks;
+            await saveFlashcardDecks();
+            if (typeof renderDecks === 'function') renderDecks();
+            if (typeof renderFlashcardOverview === 'function') renderFlashcardOverview();
+            if (typeof updateStatsSummary === 'function') updateStatsSummary();
+          }
+        } catch (e) {}
+      }
       loadUserData();
       renderAll();
       setupSupabaseRealtime(currentSupabaseUser.id);
@@ -2643,32 +2800,43 @@ function renderProgress() {
 }
 
 function renderStats() {
-  const studyMinutes = Math.floor((data.studySeconds || 0) / 60);
-  const studyPercent = data.studyGoal > 0 ? Math.min(100, Math.round((studyMinutes / data.studyGoal) * 100)) : 0;
-  el("studyTimeText").textContent = `${Math.floor(studyMinutes / 60)}h ${studyMinutes % 60}m`;
-  el("studyProgressBar").style.width = `${studyPercent}%`;
-  el("studyGoalText").textContent = `Goal: ${formatGoalHours(data.studyGoal)} · ${studyPercent}%`;
-  el("studyGoalInput").value = Number((data.studyGoal / 60).toFixed(2));
+  const activeData = (typeof data !== "undefined" && data) || (typeof window !== "undefined" && window.data) || (typeof globalThis !== "undefined" && globalThis.data);
+  if (!activeData) return;
+  const studyMinutes = Math.floor((activeData.studySeconds || 0) / 60);
+  const studyPercent = activeData.studyGoal > 0 ? Math.min(100, Math.round((studyMinutes / activeData.studyGoal) * 100)) : 0;
+  const studyTimeEl = el("studyTimeText");
+  if (studyTimeEl) studyTimeEl.textContent = `${Math.floor(studyMinutes / 60)}h ${studyMinutes % 60}m`;
+  const studyProgressBar = el("studyProgressBar");
+  if (studyProgressBar) studyProgressBar.style.width = `${studyPercent}%`;
+  const studyGoalText = el("studyGoalText");
+  if (studyGoalText) studyGoalText.textContent = `Goal: ${formatGoalHours(activeData.studyGoal)} · ${studyPercent}%`;
+  const studyGoalInput = el("studyGoalInput");
+  if (studyGoalInput) studyGoalInput.value = Number(((activeData.studyGoal || 0) / 60).toFixed(2));
 
   const todayStr = getLocalDateString(new Date());
   let cardsReviewedToday = 0;
-  if (Array.isArray(data.flashcardReviews) && data.flashcardReviews.length > 0) {
-    cardsReviewedToday = data.flashcardReviews.filter(r => {
+  if (Array.isArray(activeData.flashcardReviews) && activeData.flashcardReviews.length > 0) {
+    cardsReviewedToday = activeData.flashcardReviews.filter(r => {
       const reviewDate = getLocalDateString(r.timestamp || r.date || r.created_at);
       return reviewDate === todayStr;
     }).length;
-  } else if (data.lastActiveDate === todayStr) {
-    cardsReviewedToday = Number(data.flashcardsToday) || 0;
+  } else if (activeData.lastActiveDate === todayStr) {
+    cardsReviewedToday = Number(activeData.flashcardsToday) || 0;
   }
-  data.flashcardsToday = cardsReviewedToday;
+  activeData.flashcardsToday = cardsReviewedToday;
 
-  const flashcardPercent = data.flashcardsGoal > 0 ? Math.min(100, Math.round((cardsReviewedToday / data.flashcardsGoal) * 100)) : 0;
-  el("flashcardsText").textContent = cardsReviewedToday;
-  el("flashcardsBar").style.width = `${flashcardPercent}%`;
-  el("flashcardsGoalText").textContent = `Goal: ${data.flashcardsGoal} · ${flashcardPercent}%`;
-  el("flashcardsGoalInput").value = data.flashcardsGoal || 50;
-  const avgTime = data.flashcardTotalCount > 0 ? (data.flashcardTotalTime / data.flashcardTotalCount).toFixed(1) : 0;
-  el("flashcardAvgTime").textContent = `Avg time: ${avgTime}s`;
+  const flashcardPercent = activeData.flashcardsGoal > 0 ? Math.min(100, Math.round((cardsReviewedToday / activeData.flashcardsGoal) * 100)) : 0;
+  const flashcardsText = el("flashcardsText");
+  if (flashcardsText) flashcardsText.textContent = cardsReviewedToday;
+  const flashcardsBar = el("flashcardsBar");
+  if (flashcardsBar) flashcardsBar.style.width = `${flashcardPercent}%`;
+  const flashcardsGoalText = el("flashcardsGoalText");
+  if (flashcardsGoalText) flashcardsGoalText.textContent = `Goal: ${activeData.flashcardsGoal || 50} · ${flashcardPercent}%`;
+  const flashcardsGoalInput = el("flashcardsGoalInput");
+  if (flashcardsGoalInput) flashcardsGoalInput.value = activeData.flashcardsGoal || 50;
+  const avgTime = activeData.flashcardTotalCount > 0 ? (activeData.flashcardTotalTime / activeData.flashcardTotalCount).toFixed(1) : 0;
+  const flashcardAvgTime = el("flashcardAvgTime");
+  if (flashcardAvgTime) flashcardAvgTime.textContent = `Avg time: ${avgTime}s`;
   const focusScoreText = el("focusScoreText");
   if (focusScoreText) focusScoreText.textContent = data.focusScore || 0;
   const focusScoreBar = el("focusScoreBar");
@@ -7568,15 +7736,18 @@ function renderFlashcardsTab() {
       ? data.settings.dailyFlashcardGoal
       : (data && typeof data.flashcardsGoal === "number" ? data.flashcardsGoal : 50);
 
-    container.innerHTML = `
-      <div class="limit-badge" style="margin-bottom: 16px;">Daily Goal: <span id="flashcardGoalProgress">${progress}</span> / <span id="flashcardGoalTotal">${goalTotal}</span></div>
-      <div class="empty-state">
-        <div class="icon">◈</div>
-        <h3>Ready to study</h3>
-        <p>Select an imported deck from the list on the left, or upload a new Anki deck package (.apkg) to start learning.</p>
-      </div>
-    `;
-    el("studyKicker").textContent = "Active Study";
+    if (container) {
+      container.innerHTML = `
+        <div class="limit-badge" style="margin-bottom: 16px;">Daily Goal: <span id="flashcardGoalProgress">${progress}</span> / <span id="flashcardGoalTotal">${goalTotal}</span></div>
+        <div class="empty-state">
+          <div class="icon">◈</div>
+          <h3>Ready to study</h3>
+          <p>Select an imported deck from the list on the left, or upload a new Anki deck package (.apkg) to start learning.</p>
+        </div>
+      `;
+    }
+    const kicker = el("studyKicker");
+    if (kicker) kicker.textContent = "Active Study";
   } else {
     if (closeBtn) closeBtn.classList.remove("hidden");
     renderActiveCard();
@@ -7585,7 +7756,7 @@ function renderFlashcardsTab() {
 
 function initDeckListDelegation() {
   const listContainer = el("deckList");
-  if (!listContainer || listContainer.dataset.delegated) return;
+  if (!listContainer || !listContainer.dataset || listContainer.dataset.delegated) return;
   listContainer.dataset.delegated = "true";
 
   listContainer.addEventListener("click", async (e) => {
@@ -7640,6 +7811,7 @@ function initDeckListDelegation() {
 
 function renderDeckList() {
   const listContainer = el("deckList");
+  if (!listContainer) return;
   listContainer.innerHTML = "";
   initDeckListDelegation();
   
@@ -9445,11 +9617,10 @@ function bindEvents() {
     exportDecksBtn.addEventListener("click", async () => {
       try {
         let decks = (data && data.flashcardDecks) ? data.flashcardDecks : {};
-        if (currentUser) {
-          const idbDecks = await idb.get(`flashcard-decks:${currentUser}`);
-          if (idbDecks && Object.keys(idbDecks).length > 0) {
-            decks = idbDecks;
-          }
+        const userKey = getIDBUserKey();
+        const idbDecks = (await idb.get(`flashcard-decks:${userKey}`)) || (await idb.get("flashcardDecks"));
+        if (idbDecks && Object.keys(idbDecks).length > 0) {
+          decks = idbDecks;
         }
         const blob = new Blob([JSON.stringify({ exportDate: new Date().toISOString(), decks }, null, 2)], { type: "application/json" });
         const url = URL.createObjectURL(blob);
@@ -9841,6 +10012,15 @@ async function initGuestOrCachedState() {
     return;
   }
 
+  const decks = await loadFlashcardDecksAsync();
+  if (decks && Object.keys(decks).length > 0) {
+    if (!data) data = typeof defaultData === "function" ? defaultData() : {};
+    data.flashcardDecks = decks;
+  }
+  if (typeof renderDecks === "function") renderDecks();
+  if (typeof renderFlashcardOverview === "function") renderFlashcardOverview();
+  if (typeof updateStatsSummary === "function") updateStatsSummary();
+
   // If no active session, show the login view
   setAuthMode("login");
   const authEl = el("authView") || authView;
@@ -9861,6 +10041,16 @@ async function initializeApplication(user) {
     } else {
       await initGuestOrCachedState();
     }
+
+    const decks = await loadFlashcardDecksAsync();
+    if (decks && Object.keys(decks).length > 0) {
+      data.flashcardDecks = decks;
+    }
+    // Explicitly trigger deck re-renders once IndexedDB resolves:
+    if (typeof renderDecks === "function") renderDecks();
+    if (typeof renderFlashcardOverview === "function") renderFlashcardOverview();
+    if (typeof updateStatsSummary === "function") updateStatsSummary();
+
     isAppInitialized = true;
   } catch (err) {
     console.error("Error during initializeApplication:", err);
@@ -9874,7 +10064,13 @@ async function initApp() {
   bindEvents();
 
   // Load decks and study data asynchronously from IndexedDB instead of parsing from study-assistant-v1
-  await loadFlashcardDecksAsync();
+  const decks = await loadFlashcardDecksAsync();
+  if (decks && Object.keys(decks).length > 0 && data) {
+    data.flashcardDecks = decks;
+  }
+  if (typeof renderDecks === "function") renderDecks();
+  if (typeof renderFlashcardOverview === "function") renderFlashcardOverview();
+  if (typeof updateStatsSummary === "function") updateStatsSummary();
   await loadHeavyStudyDataFromIDB();
 
   if (supabaseClient) {
