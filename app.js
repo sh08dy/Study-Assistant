@@ -727,14 +727,132 @@ function loadDb() {
   }
 }
 
-function saveDb() {
-  const dbCopy = JSON.parse(JSON.stringify(db));
-  for (const email in dbCopy.users) {
-    if (dbCopy.users[email].data) {
-      dbCopy.users[email].data.flashcardDecks = {};
+function isQuotaExceeded(e) {
+  return (
+    e &&
+    (e.name === "QuotaExceededError" ||
+     e.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+     e.code === 22 ||
+     e.code === 1014 ||
+     e.number === -2147024882 ||
+     (typeof e.message === "string" && e.message.toLowerCase().includes("quota")))
+  );
+}
+
+function pruneLocalStorageData(key = storeKey, value = null) {
+  try {
+    let rawObj = value;
+    if (!rawObj) {
+      if (key === storeKey) {
+        rawObj = db;
+      } else {
+        rawObj = data;
+      }
+    }
+    if (!rawObj) return false;
+
+    const dataToPrune = JSON.parse(JSON.stringify(rawObj));
+
+    const sanitizeUserData = (userData) => {
+      if (!userData || typeof userData !== "object") return;
+      userData.flashcardDecks = {};
+      if (Array.isArray(userData.flashcardReviews) && userData.flashcardReviews.length > 100) {
+        userData.flashcardReviews = userData.flashcardReviews.slice(-100);
+      }
+      if (Array.isArray(userData.history) && userData.history.length > 100) {
+        userData.history = userData.history.slice(-100);
+      }
+      if (Array.isArray(userData.pendingSyncQueue) && userData.pendingSyncQueue.length > 50) {
+        userData.pendingSyncQueue = userData.pendingSyncQueue.slice(-50);
+      }
+      delete userData.backupHistory;
+      delete userData.cachedPayloads;
+      delete userData.cachedSnapshots;
+    };
+
+    if (dataToPrune.users && typeof dataToPrune.users === "object") {
+      for (const uKey in dataToPrune.users) {
+        if (dataToPrune.users[uKey]?.data) {
+          sanitizeUserData(dataToPrune.users[uKey].data);
+        }
+      }
+    } else {
+      sanitizeUserData(dataToPrune);
+    }
+
+    try {
+      localStorage.setItem(key, JSON.stringify(dataToPrune));
+      console.warn(`Pruned localStorage data for '${key}' to stay within quota.`);
+      return true;
+    } catch (secondErr) {
+      // More aggressive pruning if still exceeding quota
+      if (dataToPrune.users && typeof dataToPrune.users === "object") {
+        for (const uKey in dataToPrune.users) {
+          if (dataToPrune.users[uKey]?.data) {
+            if (Array.isArray(dataToPrune.users[uKey].data.flashcardReviews)) {
+              dataToPrune.users[uKey].data.flashcardReviews = dataToPrune.users[uKey].data.flashcardReviews.slice(-20);
+            }
+            if (Array.isArray(dataToPrune.users[uKey].data.history)) {
+              dataToPrune.users[uKey].data.history = dataToPrune.users[uKey].data.history.slice(-20);
+            }
+          }
+        }
+      } else {
+        if (Array.isArray(dataToPrune.flashcardReviews)) {
+          dataToPrune.flashcardReviews = dataToPrune.flashcardReviews.slice(-20);
+        }
+        if (Array.isArray(dataToPrune.history)) {
+          dataToPrune.history = dataToPrune.history.slice(-20);
+        }
+      }
+      try {
+        localStorage.setItem(key, JSON.stringify(dataToPrune));
+        console.warn(`Aggressively pruned localStorage data for '${key}'.`);
+        return true;
+      } catch (thirdErr) {
+        console.error(`Unable to save '${key}' even after aggressive pruning:`, thirdErr);
+        return false;
+      }
+    }
+  } catch (err) {
+    console.error(`Error during pruneLocalStorageData for '${key}':`, err);
+    return false;
+  }
+}
+
+function saveDb(key = storeKey, value = null) {
+  try {
+    let payloadStr;
+    if (value !== null && value !== undefined) {
+      if (typeof value === "string") {
+        payloadStr = value;
+      } else {
+        const copy = JSON.parse(JSON.stringify(value));
+        if (copy && copy.users) {
+          for (const u in copy.users) {
+            if (copy.users[u]?.data) copy.users[u].data.flashcardDecks = {};
+          }
+        }
+        payloadStr = JSON.stringify(copy);
+      }
+    } else {
+      const dbCopy = JSON.parse(JSON.stringify(db));
+      for (const email in dbCopy.users) {
+        if (dbCopy.users[email]?.data) {
+          dbCopy.users[email].data.flashcardDecks = {};
+        }
+      }
+      payloadStr = JSON.stringify(dbCopy);
+    }
+    localStorage.setItem(key, payloadStr);
+  } catch (err) {
+    if (isQuotaExceeded(err)) {
+      console.warn(`QuotaExceededError saving '${key}'. Initiating automatic pruning...`);
+      pruneLocalStorageData(key, value !== null && value !== undefined ? value : db);
+    } else {
+      console.warn(`Failed to save '${key}' to localStorage:`, err);
     }
   }
-  localStorage.setItem(storeKey, JSON.stringify(dbCopy));
 }
 
 function saveUser() {
@@ -755,7 +873,15 @@ function saveUser() {
     const storageKey = getStorageKey();
     const dataCopy = JSON.parse(JSON.stringify(data || defaultData()));
     dataCopy.flashcardDecks = {};
-    localStorage.setItem(storageKey, JSON.stringify(dataCopy));
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(dataCopy));
+    } catch (err) {
+      if (isQuotaExceeded(err)) {
+        pruneLocalStorageData(storageKey, dataCopy);
+      } else {
+        throw err;
+      }
+    }
   } catch (err) {
     console.warn("Failed to persist scoped user data:", err);
   }
@@ -1681,18 +1807,49 @@ async function handleAuth(event) {
 }
 
 async function login(email, supabaseUser = null) {
-  const userId = supabaseUser?.id || (email ? email.toLowerCase().trim() : "guest");
+  let userObj = null;
+  if (email && typeof email === "object") {
+    userObj = email;
+  }
+
+  if (!supabaseUser && userObj) {
+    if (userObj.aud || userObj.user_metadata || (userObj.user && userObj.user.aud)) {
+      supabaseUser = userObj.user || userObj;
+    }
+  }
+
+  const rawEmail = typeof email === "string" 
+    ? email 
+    : (email?.email || email?.user?.email || "");
+  const cleanEmail = (rawEmail || "").trim().toLowerCase();
+
+  if (!cleanEmail && !userObj && !supabaseUser) {
+    console.warn("login called without valid email string:", email);
+  }
+
+  const userId = supabaseUser?.id || userObj?.id || (cleanEmail || "guest");
+  const userName = supabaseUser?.user_metadata?.name ||
+                   currentSupabaseUser?.user_metadata?.name ||
+                   userObj?.name ||
+                   (rawEmail ? rawEmail.split("@")[0] : (cleanEmail ? cleanEmail.split("@")[0] : "User"));
+
   currentUser = {
     id: userId,
-    email: email,
-    name: supabaseUser?.user_metadata?.name || currentSupabaseUser?.user_metadata?.name || email.split("@")[0],
+    email: rawEmail || cleanEmail || userId,
+    name: userName,
     toString() { return this.id; }
   };
   if (supabaseUser) {
     currentSupabaseUser = supabaseUser;
   }
-  localStorage.setItem(`${storeKey}:session`, email);
-  localStorage.setItem("duepoint:session", JSON.stringify({ id: userId, email: email, name: currentUser.name }));
+
+  const sessionEmailOrId = cleanEmail || rawEmail || userId;
+  try {
+    localStorage.setItem(`${storeKey}:session`, sessionEmailOrId);
+    localStorage.setItem("duepoint:session", JSON.stringify({ id: userId, email: currentUser.email, name: currentUser.name }));
+  } catch (err) {
+    console.warn("Failed to persist session to localStorage:", err);
+  }
 
   const storageKey = getStorageKey();
   let loadedData = null;
@@ -1703,23 +1860,33 @@ async function login(email, supabaseUser = null) {
     }
   } catch (e) {}
 
-  if (!loadedData && db.users && db.users[email]?.data) {
-    loadedData = db.users[email].data;
+  const userKey = cleanEmail || userId;
+  if (!loadedData && db.users) {
+    if (db.users[userKey]?.data) {
+      loadedData = db.users[userKey].data;
+    } else if (rawEmail && db.users[rawEmail]?.data) {
+      loadedData = db.users[rawEmail].data;
+    } else if (cleanEmail && db.users[cleanEmail]?.data) {
+      loadedData = db.users[cleanEmail].data;
+    }
   }
 
-  if (!db.users[email]) {
-    db.users[email] = {
+  if (!db.users) db.users = {};
+  if (!db.users[userKey]) {
+    db.users[userKey] = {
       name: currentUser.name,
       data: loadedData || defaultData()
     };
     saveDb();
   }
 
-  data = normalizeData(loadedData || db.users[email]?.data || defaultData());
+  data = normalizeData(loadedData || db.users[userKey]?.data || defaultData());
   loadUserData();
   
   try {
-    data.flashcardDecks = await idb.get(`flashcard-decks:${currentUser.id}`) || await idb.get(`flashcard-decks:${email}`) || {};
+    data.flashcardDecks = await idb.get(`flashcard-decks:${currentUser.id}`) || 
+                          (cleanEmail ? await idb.get(`flashcard-decks:${cleanEmail}`) : null) || 
+                          (rawEmail ? await idb.get(`flashcard-decks:${rawEmail}`) : null) || {};
   } catch (err) {
     console.error("Failed to load decks from IndexedDB:", err);
     data.flashcardDecks = {};
@@ -1733,15 +1900,16 @@ async function login(email, supabaseUser = null) {
   closeAuthModal();
 
   // Update avatar & tooltips
-  const initials = (email || "DP").substring(0, 2).toUpperCase();
+  const displayEmailOrName = cleanEmail || rawEmail || currentUser.name || "User";
+  const initials = (displayEmailOrName || "DP").substring(0, 2).toUpperCase();
   const userBtn = el("userButton");
   if (userBtn) {
     userBtn.textContent = initials;
-    userBtn.title = `Logged in as ${email} (Click to manage account)`;
+    userBtn.title = `Logged in as ${displayEmailOrName} (Click to manage account)`;
   }
   const logoutBtn = el("logoutButton");
   if (logoutBtn) {
-    logoutBtn.title = `Log Out (${email})`;
+    logoutBtn.title = `Log Out (${displayEmailOrName})`;
   }
 
   renderAll();
